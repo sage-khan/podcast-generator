@@ -22,7 +22,7 @@ trigger: always_on
 
 ## Open-Source Contributor Guidelines
 
-This project was originally built under a client engagement (Syllaby) and has since
+This project was originally built under a prior client engagement and has since
 been genericized for public release. When writing code, docs, or examples here,
 think from the perspective of an external contributor who has never seen the
 original client context:
