@@ -1,0 +1,55 @@
+name: SSL Certificate Renewal
+
+on:
+  # Run once a month on the 1st at midnight
+  schedule:
+    - cron: '0 0 1 * *'
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  renew-ssl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.DO_SSH_KEY }}
+          known_hosts: ${{ secrets.DO_KNOWN_HOSTS }}
+      
+      - name: Renew SSL Certificate
+        run: |
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DO_DROPLET_IP }} << EOF
+            # Define variables
+            export DOMAIN="${{ secrets.DOMAIN }}"
+            export WWW_ROOT="/var/www/podcast-generator"
+            export CERTBOT_WEBROOT="\$WWW_ROOT/nginx/acme_challenge"
+
+            cd \$WWW_ROOT
+
+            # Ensure Certbot is installed
+            if ! command -v certbot &> /dev/null; then
+              echo "Installing Certbot..."
+              apt-get update
+              apt-get install -y certbot
+            fi
+
+            # Ensure webroot directory exists
+            mkdir -p \$CERTBOT_WEBROOT
+
+            # Verify Nginx is running
+            if ! docker compose ps --filter status=running -q nginx | grep -q .; then
+              echo "Starting Nginx container..."
+              docker compose up -d nginx
+              sleep 3
+            fi
+
+            # Run Certbot for renewal
+            echo "Renewing certificate for \$DOMAIN..."
+            certbot certonly --webroot -w \$CERTBOT_WEBROOT -d \$DOMAIN --non-interactive --agree-tos --email admin@\$DOMAIN
+
+            # Reload Nginx to use new certificate
+            docker compose exec nginx nginx -s reload
+
+            echo "SSL certificate renewal completed!"
+          EOF

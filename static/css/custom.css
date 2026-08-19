@@ -1,0 +1,385 @@
+/*
+ * Podcast Generator — design tokens & components.
+ * A broadcast-console palette: graphite surfaces, an amber "tally light"
+ * accent, monospace treatment for job IDs / model IDs / status tags.
+ */
+
+:root {
+    --bg: #16181c;
+    --bg-elevated: #1d2025;
+    --bg-elevated-2: #23272e;
+    --border: #2d323a;
+    --text: #e9e6df;
+    --text-muted: #9aa0a8;
+    --accent: #e3a857;
+    --accent-strong: #f2bd72;
+    --accent-ink: #241a0a;
+    --teal: #4c9a8e;
+    --danger: #c4544b;
+
+    --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6,
+.navbar-brand,
+.hero-title {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+}
+
+/* --- Bootstrap variable overrides (keeps existing .btn-primary/.text-info/etc usable) --- */
+:root, [data-bs-theme="dark"] {
+    --bs-body-bg: var(--bg);
+    --bs-body-color: var(--text);
+    --bs-dark: var(--bg-elevated);
+    --bs-dark-rgb: 29, 32, 37;
+    --bs-secondary: #4a505a;
+    --bs-primary: var(--accent);
+    --bs-primary-rgb: 227, 168, 87;
+    --bs-border-color: var(--border);
+    --bs-link-color: var(--accent);
+    --bs-link-hover-color: var(--accent-strong);
+}
+
+.btn-primary {
+    --bs-btn-color: var(--accent-ink);
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-color: var(--accent-ink);
+    --bs-btn-hover-bg: var(--accent-strong);
+    --bs-btn-hover-border-color: var(--accent-strong);
+    font-weight: 600;
+}
+
+a {
+    color: var(--accent);
+}
+a:hover {
+    color: var(--accent-strong);
+}
+
+/* --- Navbar --- */
+.navbar {
+    background-color: var(--bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    color: var(--text) !important;
+    font-weight: 600;
+    font-size: 1.15rem;
+}
+
+.brand-mark {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(227, 168, 87, 0.18);
+    margin-right: 0.6rem;
+}
+
+.navbar-nav .nav-link {
+    color: var(--text-muted) !important;
+    font-weight: 500;
+    padding-left: 1rem !important;
+}
+
+.navbar-nav .nav-link:hover,
+.navbar-nav .nav-link.active {
+    color: var(--text) !important;
+}
+
+.site-footer {
+    background-color: var(--bg);
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
+/* --- Hero --- */
+.eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+}
+
+.hero-title {
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 1.25rem;
+}
+
+.hero-lead {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    max-width: 46ch;
+}
+
+.btn-accent {
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+    border: none;
+    padding: 0.6rem 1.25rem;
+    border-radius: 6px;
+}
+.btn-accent:hover {
+    background: var(--accent-strong);
+    color: var(--accent-ink);
+}
+
+.btn-outline-light {
+    --bs-btn-border-color: var(--border);
+    --bs-btn-color: var(--text);
+    --bs-btn-hover-bg: var(--bg-elevated-2);
+    --bs-btn-hover-border-color: var(--accent);
+    --bs-btn-hover-color: var(--text);
+}
+
+/* --- Pipeline panel (hero signature element) --- */
+.pipeline-panel {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.5rem;
+}
+
+.pipeline-panel-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+.pipeline-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pipeline-steps li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.85rem;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.pipeline-steps li:last-child {
+    border-bottom: none;
+}
+
+.step-index {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-size: 0.85rem;
+}
+
+.step-name {
+    font-weight: 600;
+    flex: 1;
+}
+
+.step-tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* --- Panel cards (feature cards on the landing page) --- */
+.panel-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.75rem;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.panel-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.panel-card-compact {
+    padding: 1.25rem;
+}
+
+.panel-icon {
+    font-size: 1.5rem;
+    color: var(--accent);
+    margin-bottom: 0.9rem;
+    display: block;
+}
+
+.panel-icon-sm {
+    font-size: 1.1rem;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+    display: block;
+}
+
+.link-arrow {
+    font-weight: 600;
+    text-decoration: none;
+}
+
+/* --- Cards (Bootstrap defaults used across model_gallery / playground / etc.) --- */
+.card {
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border);
+}
+
+.card-header {
+    background-color: var(--bg-elevated-2) !important;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Job / model identifiers read as data, not prose */
+.badge {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+/* Image cards hover effects */
+.image-card {
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+}
+
+.image-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35) !important;
+}
+
+.image-card.selected {
+    border: 2px solid var(--accent) !important;
+}
+
+/* Character thumbnail selection */
+.character-thumbnail {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+}
+
+.character-thumbnail:hover {
+    transform: scale(1.05);
+    border-color: var(--accent);
+}
+
+.character-thumbnail.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* Loading animation — styled like a recording/on-air indicator */
+.loading-wave {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 40px;
+}
+
+.loading-wave .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin: 0 4px;
+    background-color: var(--accent);
+    animation: wave 1.4s linear infinite;
+}
+
+.loading-wave .dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loading-wave .dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave {
+    0%, 60%, 100% {
+        transform: translateY(0);
+    }
+    30% {
+        transform: translateY(-10px);
+    }
+}
+
+/* Selected images container */
+#selectedImagesContainer {
+    min-height: 120px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bs-secondary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+}
+
+/* Keyboard focus visibility */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+    .image-card, .character-thumbnail, .panel-card, .loading-wave .dot {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    .lead {
+        font-size: 1rem;
+    }
+
+    .pipeline-panel {
+        margin-top: 2rem;
+    }
+}

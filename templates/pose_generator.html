@@ -1,0 +1,181 @@
+{# Reference template only — not currently wired to a URL route. The image_generation/model_training views it posts to now return JSON, not a rendered page, so this form-based flow needs an AJAX rewrite (see model_gallery.html or google_veo3_playground.html for the current pattern) before it can go live. #}
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h1 class="mb-4"><i class="fas fa-people-arrows me-2 text-warning"></i>Pose Generator</h1>
+            <p class="lead mb-4">Create different poses for your character while maintaining visual consistency</p>
+            
+            <div class="row">
+                <!-- Generation Form -->
+                <div class="col-md-5">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body p-4">
+                            <h2 class="h5 mb-4">Generate Poses</h2>
+                            
+                            <form id="poseForm" action="{% url 'image_generation:generate_poses' %}" method="post">
+                                <div class="mb-4">
+                                    <label for="image_url" class="form-label">Character Image URL</label>
+                                    <input type="url" class="form-control" id="image_url" name="image_url" 
+                                          placeholder="https://example.com/your-character.jpg" required>
+                                    <small class="form-text text-muted">
+                                        URL of your character image or select from previously generated
+                                    </small>
+                                </div>
+                                
+                                <div class="mb-4">
+                                    <label for="num_poses" class="form-label">Number of Poses</label>
+                                    <select class="form-select" id="num_poses" name="num_poses">
+                                        <option value="2">2 Poses</option>
+                                        <option value="4" selected>4 Poses</option>
+                                        <option value="6">6 Poses</option>
+                                        <option value="8">8 Poses</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary" id="generatePosesBtn">
+                                        <i class="fas fa-sync-alt me-2"></i>Generate Poses
+                                    </button>
+                                </div>
+                            </form>
+                            
+                            <div class="mt-4">
+                                <h3 class="h6">Previously Generated Characters:</h3>
+                                <div id="previousCharacters" class="row g-2 mt-2">
+                                    <!-- Will be populated with JS if available -->
+                                    {% if session.generated_images %}
+                                        {% for image in session.generated_images %}
+                                            <div class="col-6 col-sm-4">
+                                                <img src="{{ image.image_url }}" class="img-thumbnail character-thumbnail" 
+                                                     alt="Character" data-url="{{ image.image_url }}">
+                                            </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="col-12">
+                                            <p class="small text-muted">No characters available. Generate some first!</p>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Generated Poses Display -->
+                <div class="col-md-7">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <h2 class="h5 mb-4">Generated Poses</h2>
+                            
+                            <div id="loadingIndicator" class="text-center d-none">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Generating poses... This may take a few minutes.</p>
+                            </div>
+                            
+                            <div id="generatedPoses">
+                                {% if session.generated_poses %}
+                                    {% for pose_set in session.generated_poses %}
+                                        <div class="mb-4">
+                                            <div class="d-flex align-items-center mb-3">
+                                                <h3 class="h6 me-2 mb-0">Original Character:</h3>
+                                                <img src="{{ pose_set.original_image }}" class="img-thumbnail" 
+                                                     style="height: 60px; width: auto;" alt="Original character">
+                                            </div>
+                                            
+                                            <div class="row g-3">
+                                                {% for pose_image in pose_set.pose_images %}
+                                                    <div class="col-sm-6">
+                                                        <div class="card h-100 border-0 shadow-sm">
+                                                            <img src="{{ pose_image }}" class="card-img-top" alt="Character pose">
+                                                            <div class="card-body">
+                                                                <div class="d-grid">
+                                                                    <button class="btn btn-sm btn-outline-success use-for-training-btn"
+                                                                            data-image-url="{{ pose_image }}">
+                                                                        Use for Training
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                        <hr class="my-4">
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="text-center py-5">
+                                        <i class="fas fa-images fa-3x mb-3 text-muted"></i>
+                                        <p>No poses generated yet. Select a character and generate poses!</p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check for image URL from character generator
+        const selectedImageUrl = sessionStorage.getItem('selectedImageUrl');
+        const imageUrlInput = document.getElementById('image_url');
+        
+        if (selectedImageUrl && imageUrlInput) {
+            imageUrlInput.value = selectedImageUrl;
+            // Clear after using
+            sessionStorage.removeItem('selectedImageUrl');
+        }
+        
+        // Show loading indicator when form is submitted
+        const poseForm = document.getElementById('poseForm');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const generatedPoses = document.getElementById('generatedPoses');
+        
+        if (poseForm) {
+            poseForm.addEventListener('submit', function() {
+                loadingIndicator.classList.remove('d-none');
+                generatedPoses.classList.add('d-none');
+            });
+        }
+        
+        // Handle character thumbnail clicks
+        const characterThumbnails = document.querySelectorAll('.character-thumbnail');
+        characterThumbnails.forEach(thumbnail => {
+            thumbnail.addEventListener('click', function() {
+                const imageUrl = this.getAttribute('data-url');
+                if (imageUrlInput) {
+                    imageUrlInput.value = imageUrl;
+                }
+            });
+        });
+        
+        // Handle "Use for Training" buttons
+        const trainingButtons = document.querySelectorAll('.use-for-training-btn');
+        trainingButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const imageUrl = this.getAttribute('data-image-url');
+                // Get existing training images or initialize empty array
+                let trainingImages = JSON.parse(sessionStorage.getItem('trainingImages') || '[]');
+                // Add this image if not already present
+                if (!trainingImages.includes(imageUrl)) {
+                    trainingImages.push(imageUrl);
+                    sessionStorage.setItem('trainingImages', JSON.stringify(trainingImages));
+                    alert('Image added to training collection!');
+                } else {
+                    alert('This image is already in your training collection.');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

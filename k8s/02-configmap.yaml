@@ -1,0 +1,39 @@
+# Template for the app-config Kubernetes ConfigMap.
+# Replace REPLACE_ME values with your own deployment's real values before applying.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: podcast-generator
+data:
+  DJANGO_SETTINGS_MODULE: "config.settings"
+  PYTHONPATH: "/app"
+  STORAGE_BACKEND: "do_spaces"
+  REPLICATE_OWNER: "your-replicate-username"
+  REPLICATE_LORA_TRAINER_MODEL: "ostris/flux-dev-lora-trainer:c6e78d2501e8088876e99ef21e4460d0dc121af7a4b786b9a4c2d75c620e300d"
+  DJANGO_DEBUG: "False"
+  DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,REPLACE_ME"
+  GITHUB_REPO: "your-org/podcast-generator"
+  GITHUB_BRANCH: "main"
+  DB_HOST: "REPLACE_ME"
+  DB_PORT: "25060"
+  PGHOST: "REPLACE_ME"
+  PGPORT: "25060"
+  PGSSLMODE: "verify-ca"
+  DOMAIN: "REPLACE_ME"
+  K8S_DOMAIN: "REPLACE_ME"
+  DO_SPACES_BUCKET: "REPLACE_ME"
+  DO_SPACES_REGION: "nyc3"
+  DO_SPACES_ENDPOINT: "https://nyc3.digitaloceanspaces.com"
+  DO_SPACES_BASE_URL: "https://nyc3.digitaloceanspaces.com"
+  CHARACTER_GENERATION_PATH: "character_generation/output"
+  POSE_GENERATION_PATH: "pose_generation/output"
+  MODEL_TRAINING_PATH: "model_training/output"
+  MODEL_GENERATION_PATH: "model_generation/output"
+  K8S_CLUSTER_ID: "REPLACE_ME"
+  K8S_CLUSTER_NAME: "REPLACE_ME"
+  K8S_CLUSTER_SERVER: "REPLACE_ME"
+  K8S_CLUSTER_REGION: "nyc3"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"

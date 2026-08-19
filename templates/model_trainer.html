@@ -1,0 +1,295 @@
+{# Reference template only — not currently wired to a URL route. The image_generation/model_training views it posts to now return JSON, not a rendered page, so this form-based flow needs an AJAX rewrite (see model_gallery.html or google_veo3_playground.html for the current pattern) before it can go live. #}
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h1 class="mb-4"><i class="fas fa-brain me-2 text-danger"></i>Model Trainer</h1>
+            <p class="lead mb-4">Train a custom LoRA model using the Ostris trainer for consistent character generation</p>
+            
+            <div class="row">
+                <!-- Training Form -->
+                <div class="col-md-5">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body p-4">
+                            <h2 class="h5 mb-4">Train a Model</h2>
+                            
+                            <form id="trainingForm" action="{% url 'model_training:finetune_lora' %}" method="post">
+                                <div class="mb-3">
+                                    <label for="model_name" class="form-label">Model Name</label>
+                                    <input type="text" class="form-control" id="model_name" name="model_name" 
+                                          placeholder="Give your model a name" required>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="trigger_word" class="form-label">Trigger Word</label>
+                                    <input type="text" class="form-control" id="trigger_word" name="trigger_word" 
+                                          placeholder="Word to use in prompts" required>
+                                    <small class="form-text text-muted">
+                                        A unique word to identify your character in future prompts
+                                    </small>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Training Images</label>
+                                    <div id="selectedImagesContainer" class="border rounded p-3 mb-2">
+                                        <div id="noImagesMessage" class="text-center py-3">
+                                            <i class="fas fa-image text-muted mb-2"></i>
+                                            <p class="small text-muted mb-0">No images selected. Add from gallery below.</p>
+                                        </div>
+                                        <div id="selectedImagesList" class="row g-2">
+                                            <!-- Selected images will be displayed here -->
+                                        </div>
+                                    </div>
+                                    <small class="form-text text-muted mb-3 d-block">
+                                        Select 4-10 images of your character for best results
+                                    </small>
+                                    
+                                    <!-- Hidden input field to store image URLs -->
+                                    <div id="trainingImagesInputs"></div>
+                                </div>
+                                
+                                <div class="alert alert-info small">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Training may take 10-15 minutes. Don't close the browser during this process.
+                                </div>
+                                
+                                <div class="d-grid mt-4">
+                                    <button type="submit" class="btn btn-primary" id="trainModelBtn">
+                                        <i class="fas fa-cogs me-2"></i>Train Model
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Training Images Gallery -->
+                <div class="col-md-7">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h2 class="h5 mb-0">Available Images</h2>
+                                <button class="btn btn-sm btn-outline-secondary" id="clearImagesBtn">
+                                    <i class="fas fa-trash-alt me-1"></i>Clear Selection
+                                </button>
+                            </div>
+                            
+                            <div id="loadingIndicator" class="text-center d-none">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Training model... This may take 10-15 minutes.</p>
+                            </div>
+                            
+                            <div id="imagesGallery">
+                                <div class="mb-4">
+                                    <h3 class="h6 mb-3">Character Images:</h3>
+                                    <div id="characterImagesGallery" class="row g-2">
+                                        <!-- Will be populated with JS if available -->
+                                        {% if session.generated_images %}
+                                            {% for image in session.generated_images %}
+                                                <div class="col-sm-4 col-6">
+                                                    <div class="card h-100 image-card" data-url="{{ image.image_url }}">
+                                                        <img src="{{ image.image_url }}" class="card-img-top" alt="Character image">
+                                                        <div class="card-footer p-1 d-flex justify-content-between">
+                                                            <small class="text-muted">Character</small>
+                                                            <div class="form-check">
+                                                                <input class="form-check-input select-image-cb" type="checkbox" value="{{ image.image_url }}">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="col-12">
+                                                <p class="text-muted small">No character images available.</p>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-4">
+                                    <h3 class="h6 mb-3">Pose Images:</h3>
+                                    <div id="poseImagesGallery" class="row g-2">
+                                        <!-- Will be populated with JS if available -->
+                                        {% if session.generated_poses %}
+                                            {% for pose_set in session.generated_poses %}
+                                                {% for pose_image in pose_set.pose_images %}
+                                                    <div class="col-sm-4 col-6">
+                                                        <div class="card h-100 image-card" data-url="{{ pose_image }}">
+                                                            <img src="{{ pose_image }}" class="card-img-top" alt="Pose image">
+                                                            <div class="card-footer p-1 d-flex justify-content-between">
+                                                                <small class="text-muted">Pose</small>
+                                                                <div class="form-check">
+                                                                    <input class="form-check-input select-image-cb" type="checkbox" value="{{ pose_image }}">
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                {% endfor %}
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="col-12">
+                                                <p class="text-muted small">No pose images available.</p>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Show loading indicator when form is submitted
+        const trainingForm = document.getElementById('trainingForm');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const imagesGallery = document.getElementById('imagesGallery');
+        
+        if (trainingForm) {
+            trainingForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Check if we have enough training images
+                const selectedImages = document.querySelectorAll('.select-image-cb:checked');
+                if (selectedImages.length < 2) {
+                    alert('Please select at least 2 images for training the model.');
+                    return;
+                }
+                
+                // Add hidden input fields for each selected image
+                const trainingImagesInputs = document.getElementById('trainingImagesInputs');
+                trainingImagesInputs.innerHTML = ''; // Clear previous inputs
+                
+                selectedImages.forEach(checkbox => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'training_images[]';
+                    input.value = checkbox.value;
+                    trainingImagesInputs.appendChild(input);
+                });
+                
+                // Show loading indicator
+                loadingIndicator.classList.remove('d-none');
+                imagesGallery.classList.add('d-none');
+                
+                // Submit the form
+                this.submit();
+            });
+        }
+        
+        // Check for previously selected training images in session storage
+        const trainingImages = JSON.parse(sessionStorage.getItem('trainingImages') || '[]');
+        const checkboxes = document.querySelectorAll('.select-image-cb');
+        
+        // Check matching checkboxes
+        if (trainingImages.length > 0) {
+            checkboxes.forEach(checkbox => {
+                if (trainingImages.includes(checkbox.value)) {
+                    checkbox.checked = true;
+                }
+            });
+            updateSelectedImagesDisplay();
+        }
+        
+        // Handle image selection
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                updateSelectedImagesDisplay();
+                
+                // Update session storage
+                const selectedValues = [...document.querySelectorAll('.select-image-cb:checked')].map(cb => cb.value);
+                sessionStorage.setItem('trainingImages', JSON.stringify(selectedValues));
+            });
+        });
+        
+        // Handle image cards click to toggle checkboxes
+        const imageCards = document.querySelectorAll('.image-card');
+        imageCards.forEach(card => {
+            card.addEventListener('click', function(e) {
+                // Don't toggle if clicking directly on the checkbox (natural behavior)
+                if (e.target.classList.contains('form-check-input')) {
+                    return;
+                }
+                
+                const checkbox = this.querySelector('.select-image-cb');
+                checkbox.checked = !checkbox.checked;
+                
+                // Trigger change event to update display
+                const event = new Event('change');
+                checkbox.dispatchEvent(event);
+            });
+        });
+        
+        // Clear selection button
+        const clearImagesBtn = document.getElementById('clearImagesBtn');
+        if (clearImagesBtn) {
+            clearImagesBtn.addEventListener('click', function() {
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+                updateSelectedImagesDisplay();
+                sessionStorage.removeItem('trainingImages');
+            });
+        }
+        
+        // Function to update the selected images display
+        function updateSelectedImagesDisplay() {
+            const selectedImages = document.querySelectorAll('.select-image-cb:checked');
+            const selectedImagesList = document.getElementById('selectedImagesList');
+            const noImagesMessage = document.getElementById('noImagesMessage');
+            
+            if (selectedImages.length > 0) {
+                selectedImagesList.innerHTML = '';
+                noImagesMessage.classList.add('d-none');
+                selectedImagesList.classList.remove('d-none');
+                
+                selectedImages.forEach(checkbox => {
+                    const imageUrl = checkbox.value;
+                    const col = document.createElement('div');
+                    col.className = 'col-4 col-sm-3';
+                    col.innerHTML = `
+                        <div class="position-relative">
+                            <img src="${imageUrl}" class="img-thumbnail" alt="Selected image">
+                            <button type="button" class="btn-close position-absolute top-0 end-0 bg-danger text-white" 
+                                    data-url="${imageUrl}"></button>
+                        </div>
+                    `;
+                    selectedImagesList.appendChild(col);
+                });
+                
+                // Add event listeners for remove buttons
+                const removeButtons = selectedImagesList.querySelectorAll('.btn-close');
+                removeButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const imageUrl = this.getAttribute('data-url');
+                        // Uncheck the corresponding checkbox
+                        checkboxes.forEach(checkbox => {
+                            if (checkbox.value === imageUrl) {
+                                checkbox.checked = false;
+                                // Trigger change event
+                                const event = new Event('change');
+                                checkbox.dispatchEvent(event);
+                            }
+                        });
+                    });
+                });
+                
+            } else {
+                selectedImagesList.innerHTML = '';
+                noImagesMessage.classList.remove('d-none');
+                selectedImagesList.classList.add('d-none');
+            }
+        }
+    });
+</script>
+{% endblock %}

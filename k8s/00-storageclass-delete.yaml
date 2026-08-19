@@ -1,0 +1,11 @@
+# StorageClass that deletes its underlying DigitalOcean block storage
+# when the PersistentVolumeClaim is deleted. This prevents orphaned
+# volumes and unexpected monthly charges.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: do-block-delete
+provisioner: dobs.csi.digitalocean.com
+reclaimPolicy: Delete        # Automatically delete DO volume when PVC deleted
+volumeBindingMode: WaitForFirstConsumer  # Provision only when a Pod is scheduled
+allowVolumeExpansion: true

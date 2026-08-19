@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: podcast-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  # Added explicit progressDeadlineSeconds to give more time for init containers
+  progressDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: registry.digitalocean.com/app-registry-colab/ai-image-gen:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        command: ["gunicorn", "--config", "/app/gunicorn.conf.py", "config.wsgi:application"]
+        envFrom:
+        - configMapRef:
+            name: app-config
+        - secretRef:
+            name: app-secrets
+        volumeMounts:
+        - name: static-volume
+          mountPath: /app/static
+        - name: media-volume
+          mountPath: /app/media
+        - name: postgres-ca
+          mountPath: /etc/ssl/certs/postgres-ca.crt
+          subPath: ca.crt
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: static-volume
+        persistentVolumeClaim:
+          claimName: static-pvc
+      - name: media-volume
+        persistentVolumeClaim:
+          claimName: media-pvc
+      - name: postgres-ca
+        secret:
+          secretName: postgres-ca
+      initContainers:
+      - name: migrations
+        image: registry.digitalocean.com/app-registry-colab/ai-image-gen:latest
+        command: ['python', 'manage.py', 'migrate', '--noinput', '--fake-initial']
+        envFrom:
+        - configMapRef:
+            name: app-config
+        - secretRef:
+            name: app-secrets
+        volumeMounts:
+        - name: postgres-ca
+          mountPath: /etc/ssl/certs/postgres-ca.crt
+          subPath: ca.crt
+      - name: collectstatic
+        image: registry.digitalocean.com/app-registry-colab/ai-image-gen:latest
+        command: ['python', 'manage.py', 'collectstatic', '--noinput']
+        envFrom:
+        - configMapRef:
+            name: app-config
+        - secretRef:
+            name: app-secrets
+        volumeMounts:
+        - name: static-volume
+          mountPath: /app/static
+        - name: postgres-ca
+          mountPath: /etc/ssl/certs/postgres-ca.crt
+          subPath: ca.crt

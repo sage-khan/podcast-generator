@@ -1,0 +1,186 @@
+name: Deploy to Digital Ocean
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.DO_SSH_KEY }}
+          known_hosts: ${{ secrets.DO_KNOWN_HOSTS }}
+          
+      - name: Deploy to Digital Ocean
+        env:
+          DO_DROPLET_IP: ${{ secrets.DO_DROPLET_IP }}
+          GITHUB_REPO: "your-org/podcast-generator"
+          GITHUB_BRANCH: "main"
+          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
+          REPLICATE_OWNER: ${{ secrets.REPLICATE_OWNER }}
+          REPLICATE_LORA_TRAINER_MODEL: ${{ secrets.REPLICATE_LORA_TRAINER_MODEL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DJANGO_DEBUG: ${{ secrets.DJANGO_DEBUG }}
+          DJANGO_ALLOWED_HOSTS: ${{ secrets.DJANGO_ALLOWED_HOSTS }}
+          DJANGO_SETTINGS_MODULE: ${{ secrets.DJANGO_SETTINGS_MODULE }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_ENGINE: ${{ secrets.DB_ENGINE }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_SSLMODE: disable
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+          DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
+          DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
+          DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
+          DO_SPACES_REGION: ${{ secrets.DO_SPACES_REGION }}
+          DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
+          DO_SPACES_ORIGIN_ENDPOINT: ${{ secrets.DO_SPACES_ORIGIN_ENDPOINT }}
+          DO_SPACES_CDN_ENDPOINT: ${{ secrets.DO_SPACES_CDN_ENDPOINT }}
+          DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DO_ALL_BUCKETS: ${{ secrets.DO_ALL_BUCKETS }}
+          DO_ALL_BUCKETS_KEY: ${{ secrets.DO_ALL_BUCKETS_KEY }}
+          DO_ALL_BUCKETS_SECRET: ${{ secrets.DO_ALL_BUCKETS_SECRET }}
+        run: |
+          # Create the .env file from secrets
+          echo "REPLICATE_API_TOKEN=${{ secrets.REPLICATE_API_TOKEN }}" > .env
+          echo "REPLICATE_OWNER=${{ secrets.REPLICATE_OWNER }}" >> .env
+          echo "REPLICATE_LORA_TRAINER_MODEL=${{ secrets.REPLICATE_LORA_TRAINER_MODEL }}" >> .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+          echo "DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}" >> .env
+          echo "DJANGO_DEBUG=${{ secrets.DJANGO_DEBUG }}" >> .env
+          echo "DJANGO_ALLOWED_HOSTS=${{ secrets.DJANGO_ALLOWED_HOSTS }}" >> .env
+          echo "DJANGO_SETTINGS_MODULE=${{ secrets.DJANGO_SETTINGS_MODULE }}" >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+          echo "DB_ENGINE=${{ secrets.DB_ENGINE }}" >> .env
+          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
+          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
+          echo "DB_SSLMODE=${{ secrets.DB_SSLMODE }}" >> .env
+          echo "STORAGE_BACKEND=${{ secrets.STORAGE_BACKEND }}" >> .env
+          echo "DO_API_TOKEN=${{ secrets.DO_API_TOKEN }}" >> .env
+          echo "DO_SPACES_KEY=${{ secrets.DO_SPACES_KEY }}" >> .env
+          echo "DO_SPACES_BUCKET=${{ secrets.DO_SPACES_BUCKET }}" >> .env
+          echo "DO_SPACES_REGION=${{ secrets.DO_SPACES_REGION }}" >> .env
+          echo "DO_SPACES_ENDPOINT=${{ secrets.DO_SPACES_ENDPOINT }}" >> .env
+          echo "DO_SPACES_ORIGIN_ENDPOINT=${{ secrets.DO_SPACES_ORIGIN_ENDPOINT }}" >> .env
+          echo "DO_SPACES_CDN_ENDPOINT=${{ secrets.DO_SPACES_CDN_ENDPOINT }}" >> .env
+          echo "DO_SPACES_SECRET=${{ secrets.DO_SPACES_SECRET }}" >> .env
+          echo "DOMAIN=${{ secrets.DOMAIN }}" >> .env
+          echo "WEBHOOK_BASE_URL=${{ secrets.WEBHOOK_BASE_URL }}" >> .env
+          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" >> .env
+          echo "DO_ALL_BUCKETS=${{ secrets.DO_ALL_BUCKETS }}" >> .env
+          echo "DO_ALL_BUCKETS_KEY=${{ secrets.DO_ALL_BUCKETS_KEY }}" >> .env
+          echo "DO_ALL_BUCKETS_SECRET=${{ secrets.DO_ALL_BUCKETS_SECRET }}" >> .env
+          
+          # Deploy using the optimized script from the deployment directory
+          bash deployment/deploy.sh
+          
+          # Verify deployment status and perform any additional configuration
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.DO_DROPLET_IP }} << EOF
+            cd /var/www/podcast-generator
+            
+            # Check if Nginx config exists and is valid
+            if [ -f "./nginx/app-nginx.conf" ]; then
+              # Only copy if different
+              if ! cmp -s ./nginx/app.conf ./nginx/app-nginx.conf; then
+                cp ./nginx/app-nginx.conf ./nginx/app.conf
+                echo "Updated Nginx configuration"
+              fi
+            fi
+            
+            # Modify the database settings to disable SSL for the droplet deployment
+            sed -i 's/'\''sslmode'\'': '\''verify-ca'\''/'\''sslmode'\'': '\''disable'\''/g' config/settings.py
+            sed -i '/'\''sslrootcert'\'': '\''\/etc\/ssl\/certs\/postgres-ca.crt'\'',/d' config/settings.py
+            
+            # Run comprehensive migrations based on setup_migrations.sh
+            echo "========================================="
+            echo "RUNNING COMPREHENSIVE DATABASE MIGRATIONS"
+            echo "========================================="
+            
+            # Docker compose down and up to ensure fresh containers
+            echo "1. Restarting Docker containers with rebuild..."
+            docker compose down
+            docker compose up -d --build
+            echo "✅ Docker containers restarted"
+            
+            # Wait for containers to initialize
+            echo "2. Waiting for containers to initialize..."
+            sleep 10
+            echo "✅ Continuing with migrations"
+            
+            # Run migrations for all apps
+            echo "3. Running migrations for all apps..."
+            
+            # Run makemigrations for all
+            echo "   - Creating migrations for all apps..."
+            docker compose exec -T web python manage.py makemigrations
+                
+            # Run migrate for all
+            echo "   - Applying all migrations..."
+            docker compose exec -T web python manage.py migrate
+            
+            # Run app-specific migrations
+            echo "4. Running app-specific migrations..."
+            
+            echo "   - audio_generation migrations..."
+            docker compose exec -T web python manage.py makemigrations audio_generation
+            docker compose exec -T web python manage.py migrate audio_generation
+            
+            echo "   - video_generation migrations..."
+            docker compose exec -T web python manage.py makemigrations video_generation
+            docker compose exec -T web python manage.py migrate video_generation
+            
+            echo "   - image_generation migrations..."
+            docker compose exec -T web python manage.py makemigrations image_generation
+            docker compose exec -T web python manage.py migrate image_generation
+            
+            echo "   - model_training migrations..."
+            docker compose exec -T web python manage.py makemigrations model_training
+            docker compose exec -T web python manage.py migrate model_training
+            
+            echo "   - podcast_generator migrations..."
+            docker compose exec -T web python manage.py makemigrations podcast_generator
+            docker compose exec -T web python manage.py migrate podcast_generator
+            
+            echo "========================================="
+            echo "✅ All migrations complete!"
+            echo "========================================="
+            
+            # Verify all containers are running
+            echo "Current running containers:"
+            docker compose ps
+            
+            # Check container logs for errors (just the last few lines)
+            echo "Checking recent web container logs:"
+            docker compose logs --tail=20 web
+          EOF
+          ## We may need this if nginx is not configured properly and migrations are not done properly.
+          #rm ./nginx/app.conf && cp ./shared/misc/app-nginx.conf ./nginx/app.conf && docker compose down && docker compose up --build -d
+          #sleep 10
+          #docker compose exec web python manage.py makemigrations && docker compose exec web python manage.py migrate
