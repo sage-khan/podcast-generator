@@ -1,0 +1,77 @@
+name: Kubernetes SSL Certificate Status Check
+
+on:
+  # Run once a month on the 1st at midnight
+  schedule:
+    - cron: '0 0 1 * *'
+  # Allow manual triggering
+  workflow_dispatch:
+
+env:
+  K8S_NAMESPACE: podcast-generator
+
+jobs:
+  check-certificates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+      
+      - name: Save kubeconfig
+        run: doctl kubernetes cluster kubeconfig save $(doctl kubernetes cluster get --format ID --no-header)
+      
+      - name: Check Certificate Status
+        run: |
+          echo "Checking certificate status for ${{ secrets.K8S_DOMAIN }}..."
+          
+          # Get cert-manager certificate status
+          CERT_STATUS=$(kubectl get certificate -n ${K8S_NAMESPACE} -o jsonpath='{.items[].status.conditions[?(@.type=="Ready")].status}')
+          
+          if [ "$CERT_STATUS" == "True" ]; then
+            EXPIRES=$(kubectl get certificate -n ${K8S_NAMESPACE} -o jsonpath='{.items[].status.notAfter}')
+            echo " Certificate is valid until $EXPIRES"
+          else
+            echo " Certificate may need attention"
+            
+            # Check for any cert-manager issues
+            kubectl describe certificate -n ${K8S_NAMESPACE}
+            kubectl describe certificaterequest -n ${K8S_NAMESPACE}
+            kubectl describe order -n ${K8S_NAMESPACE}
+            kubectl describe challenge -n ${K8S_NAMESPACE}
+            
+            # Check cert-manager pods
+            echo "Checking cert-manager pods..."
+            kubectl get pods -n cert-manager
+            
+            # Check for cert-manager logs
+            echo "Checking cert-manager controller logs..."
+            kubectl logs -n cert-manager -l app=cert-manager -c cert-manager
+          fi
+          
+          # Check if DNS record is correctly set
+          LB_IP=$(kubectl get service nginx -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "LoadBalancer IP: $LB_IP"
+          
+          # Get current DNS record
+          echo "Checking DNS record for ${{ secrets.K8S_DOMAIN }}..."
+          DOMAIN_RECORD=$(doctl compute domain records list ${{ secrets.DOMAIN }} --format Type,Name,Data --no-header | grep "A" | grep "k8s")
+          
+          echo "Current DNS record: $DOMAIN_RECORD"
+          
+          if [[ "$DOMAIN_RECORD" == *"$LB_IP"* ]]; then
+            echo " DNS record is correctly configured"
+          else
+            echo " DNS record needs to be updated to point to $LB_IP"
+            
+            # Optional: can be enabled to automatically update the DNS record
+            # DOMAIN_ID=$(echo "$DOMAIN_RECORD" | awk '{print $1}')
+            # doctl compute domain records update ${{ secrets.DOMAIN }} --record-id $DOMAIN_ID --record-data $LB_IP
+          fi
+          
+      - name: Send notification
+        if: always()
+        run: |
+          echo "Certificate check status: ${{ job.status }}"
+          # Add notification logic here (Slack, email, etc.)

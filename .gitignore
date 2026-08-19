@@ -1,0 +1,70 @@
+# --- Secrets & environment ---
+.env
+.env.local
+.env.*.local
+k8s/*.local.yaml
+k8s/postgres-ca.crt
+k8s/**/*kubeconfig*.yaml
+*.pem
+*.key
+
+# --- Local-only / company-specific docs (originals kept only on this machine) ---
+docs/internal/
+
+# --- Real CI/CD workflow targets (generic .yml.example templates stay tracked) ---
+docs/github-workflows/*.yml
+
+# --- Large / generated / scratch content, not part of the public project ---
+/misc/
+/media/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.installed.cfg
+*.egg
+
+# --- Django ---
+staticfiles/
+celerybeat-schedule
+celerybeat.pid
+*.sqlite3
+db.sqlite3
+
+# collectstatic output — regenerated at container/deploy start (see
+# docker-entrypoint.sh); only static/css and static/js are hand-authored.
+static/admin/
+static/rest_framework/
+static/drf-yasg/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- Claude Code / AI assistant local state ---
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/memory.md
+.claude/sessions.md
+.claude/tasks.md
+.cursor/agent-images/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log

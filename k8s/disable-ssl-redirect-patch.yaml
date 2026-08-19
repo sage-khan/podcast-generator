@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: podcast-generator
+data:
+  # Other config items...
+  ssl-redirect: "false"
+  proxy-ssl-verify: "false"

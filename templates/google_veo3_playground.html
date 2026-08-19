@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Google Veo-3 Video Generation Playground{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h1 class="display-5 fw-bold">Google Veo-3 Video Generation Playground</h1>
+            <p class="lead">Test the Google Veo-3 video generation model with different parameters</p>
+        </div>
+    </div>
+    
+    <div class="row">
+        <!-- Input Section -->
+        <div class="col-md-6">
+            <div class="card bg-dark shadow mb-4">
+                <div class="card-header bg-dark">
+                    <h3 class="card-title mb-0">Input</h3>
+                </div>
+                <div class="card-body">
+                    <form id="veo3Form">
+                        <div class="mb-4">
+                            <label class="form-label fw-bold" for="prompt">Prompt</label>
+                            <textarea class="form-control bg-dark text-light border-secondary" 
+                                id="prompt" 
+                                name="prompt" 
+                                rows="4"
+                                required 
+                                placeholder="A breaking news alert, followed by a TV news presenter excitedly telling us: We interrupt this programme to bring you some breaking news... Yes! It is now live on Replicate. Then she shouts: Let's go!"></textarea>
+                            <small class="text-muted">Text prompt for video generation</small>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" id="enhance_prompt" name="enhance_prompt" checked>
+                            <label class="form-check-label" for="enhance_prompt">Enhance Prompt (Use Gemini to enhance your prompts)</label>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="form-label fw-bold" for="negative_prompt">Negative Prompt</label>
+                            <textarea class="form-control bg-dark text-light border-secondary" 
+                                id="negative_prompt" 
+                                name="negative_prompt" 
+                                rows="3"
+                                placeholder="Description of what to discourage in the generated video"></textarea>
+                            <small class="text-muted">Description of what to discourage in the generated video</small>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label class="form-label fw-bold" for="seed">Seed</label>
+                            <input type="number" 
+                                class="form-control bg-dark text-light border-secondary" 
+                                id="seed" 
+                                name="seed" 
+                                placeholder="Random seed. Omit for random generations">
+                            <small class="text-muted">Random seed. Omit for random generations</small>
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button type="button" id="resetButton" class="btn btn-secondary">Reset</button>
+                            <button type="submit" id="generateButton" class="btn btn-primary">
+                                <span id="buttonNormalText">Run</span>
+                                <span id="buttonSpinner" class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Output Section -->
+        <div class="col-md-6">
+            <div class="card bg-dark shadow">
+                <div class="card-header bg-dark">
+                    <h3 class="card-title mb-0">Output</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Status message -->
+                    <div id="status" class="alert d-none mb-3" role="alert"></div>
+                    
+                    <!-- Results container -->
+                    <div id="resultContainer" class="d-none">
+                        <div class="ratio ratio-16x9 mb-3">
+                            <video id="resultVideo" class="rounded" controls></video>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <p class="mb-0">Generated in <span id="generationTime" class="fw-bold"></span></p>
+                            <div class="btn-group">
+                                <a href="#" class="btn btn-sm btn-outline-primary" id="downloadButton" target="_blank">
+                                    <i class="fas fa-download me-1"></i> Download
+                                </a>
+                                <button class="btn btn-sm btn-outline-secondary" id="copyLinkButton">
+                                    <i class="fas fa-link me-1"></i> Copy Link
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Loading indicator -->
+                    <div id="loadingContainer" class="d-none text-center py-5">
+                        <div class="spinner-border text-primary mb-3" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mb-0">Generating video... This may take a few minutes.</p>
+                    </div>
+                    
+                    <!-- Error container -->
+                    <div id="errorContainer" class="d-none">
+                        <div class="alert alert-danger">
+                            <h4 class="alert-heading">Error</h4>
+                            <p id="errorMessage" class="mb-0"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // DOM Elements
+        const veo3Form = document.getElementById('veo3Form');
+        const generateButton = document.getElementById('generateButton');
+        const resetButton = document.getElementById('resetButton');
+        const buttonSpinner = document.getElementById('buttonSpinner');
+        const buttonNormalText = document.getElementById('buttonNormalText');
+        const status = document.getElementById('status');
+        const resultContainer = document.getElementById('resultContainer');
+        const resultVideo = document.getElementById('resultVideo');
+        const loadingContainer = document.getElementById('loadingContainer');
+        const errorContainer = document.getElementById('errorContainer');
+        const errorMessage = document.getElementById('errorMessage');
+        const generationTime = document.getElementById('generationTime');
+        const downloadButton = document.getElementById('downloadButton');
+        const copyLinkButton = document.getElementById('copyLinkButton');
+        
+        // State variables
+        let currentJobId = null;
+        let pollingInterval = null;
+        let startTime = null;
+        
+        // Reset form
+        resetButton.addEventListener('click', function() {
+            veo3Form.reset();
+            stopPolling();
+            hideAllContainers();
+        });
+        
+        // Handle form submission
+        veo3Form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Validate form
+            const promptValue = document.getElementById('prompt').value.trim();
+            if (!promptValue) {
+                showError('Prompt is required');
+                return;
+            }
+            
+            // Collect form data
+            const formData = {
+                prompt: promptValue,
+                enhance_prompt: document.getElementById('enhance_prompt').checked,
+                negative_prompt: document.getElementById('negative_prompt').value.trim() || null,
+                seed: document.getElementById('seed').value || null
+            };
+            
+            // Start generation
+            startGeneration(formData);
+        });
+        
+        function startGeneration(formData) {
+            // Reset any previous state
+            stopPolling();
+            hideAllContainers();
+            
+            // Show loading state
+            setButtonLoading(true);
+            showLoadingState();
+            
+            // Record start time
+            startTime = new Date();
+            
+            // Send the API request
+            fetch('/api/video/generate/google/veo/3/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(JSON.stringify(data));
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                currentJobId = data.id;
+                showStatus('Processing', 'Video generation started. This may take a few minutes.', 'warning');
+                
+                // Start polling for status
+                startPolling(currentJobId);
+            })
+            .catch(error => {
+                let errorMsg;
+                try {
+                    errorMsg = JSON.parse(error.message);
+                    // Handle form validation errors
+                    if (typeof errorMsg === 'object') {
+                        errorMsg = Object.entries(errorMsg)
+                            .map(([key, value]) => `${key}: ${value.join(', ')}`)
+                            .join('\n');
+                    }
+                } catch (e) {
+                    errorMsg = error.message || 'Failed to start video generation';
+                }
+                showError(errorMsg);
+                setButtonLoading(false);
+            });
+        }
+        
+        function startPolling(jobId) {
+            // Poll every 5 seconds
+            pollingInterval = setInterval(() => {
+                checkJobStatus(jobId);
+            }, 5000);
+            
+            // Set a timeout of 10 minutes
+            setTimeout(() => {
+                if (pollingInterval) {
+                    stopPolling();
+                    showError('Generation timed out. Please try again or check the job status manually.');
+                }
+            }, 600000);
+        }
+        
+        function checkJobStatus(jobId) {
+            fetch(`/api/video/generate/google/veo/3/${jobId}/`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to get job status');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'succeeded') {
+                        // Generation completed successfully
+                        stopPolling();
+                        showResult(data);
+                    } else if (data.status === 'failed') {
+                        // Generation failed
+                        stopPolling();
+                        showError(data.error_message || 'Video generation failed');
+                    }
+                    // For 'starting' or 'processing', continue polling
+                })
+                .catch(error => {
+                    console.error('Error checking job status:', error);
+                    // Don't stop polling on error, just log it
+                });
+        }
+        
+        function showResult(data) {
+            // Calculate elapsed time
+            const endTime = new Date();
+            const elapsedSeconds = Math.floor((endTime - startTime) / 1000);
+            const minutes = Math.floor(elapsedSeconds / 60);
+            const seconds = elapsedSeconds % 60;
+            generationTime.textContent = `${minutes} minute${minutes !== 1 ? 's' : ''} ${seconds} second${seconds !== 1 ? 's' : ''}`;
+            
+            // Set video source
+            resultVideo.src = data.video_url;
+            downloadButton.href = data.video_url;
+            
+            // Show result container
+            loadingContainer.classList.add('d-none');
+            resultContainer.classList.remove('d-none');
+            showStatus('Success', 'Video generated successfully!', 'success');
+            setButtonLoading(false);
+            
+            // Setup copy link button
+            copyLinkButton.addEventListener('click', function() {
+                navigator.clipboard.writeText(data.video_url).then(function() {
+                    const originalText = copyLinkButton.innerHTML;
+                    copyLinkButton.innerHTML = '<i class="fas fa-check me-1"></i> Copied!';
+                    setTimeout(() => {
+                        copyLinkButton.innerHTML = originalText;
+                    }, 2000);
+                });
+            });
+        }
+        
+        function showError(message) {
+            loadingContainer.classList.add('d-none');
+            errorContainer.classList.remove('d-none');
+            errorMessage.textContent = message;
+            showStatus('Error', 'Video generation failed', 'danger');
+            setButtonLoading(false);
+        }
+        
+        function showStatus(title, message, type) {
+            status.innerHTML = `<strong>${title}:</strong> ${message}`;
+            status.className = `alert alert-${type}`;
+            status.classList.remove('d-none');
+        }
+        
+        function showLoadingState() {
+            loadingContainer.classList.remove('d-none');
+            status.classList.add('d-none');
+        }
+        
+        function hideAllContainers() {
+            loadingContainer.classList.add('d-none');
+            resultContainer.classList.add('d-none');
+            errorContainer.classList.add('d-none');
+            status.classList.add('d-none');
+        }
+        
+        function setButtonLoading(isLoading) {
+            generateButton.disabled = isLoading;
+            
+            if (isLoading) {
+                buttonSpinner.classList.remove('d-none');
+            } else {
+                buttonSpinner.classList.add('d-none');
+            }
+        }
+        
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+        
+        // Helper function to get CSRF token
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    });
+</script>
+{% endblock %}

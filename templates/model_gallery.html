@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h1 class="mb-4"><i class="fas fa-images me-2 text-success"></i>Model Gallery</h1>
+            <p class="lead mb-4">Browse and use your trained models to generate consistent characters</p>
+            
+            {% if models %}
+                <div class="row g-4">
+                    {% for model in models %}
+                        <div class="col-md-6">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-header bg-dark bg-gradient">
+                                    <h2 class="h5 card-title mb-0">{{ model.model_name }}</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <span class="badge bg-info me-2">Trigger Word: {{ model.trigger_word }}</span>
+                                        <span class="badge bg-secondary">Model ID: {{ model.model_id|slice:":10" }}</span>
+                                    </div>
+                                    
+                                    <div class="mb-4">
+                                        <h3 class="h6 mb-2">Training Images:</h3>
+                                        <div class="row g-2">
+                                            {% for image_url in model.training_images|slice:":4" %}
+                                                <div class="col-3">
+                                                    <img src="{{ image_url }}" class="img-thumbnail" alt="Training image">
+                                                </div>
+                                            {% endfor %}
+                                            {% if model.training_images|length > 4 %}
+                                                <div class="col-3 d-flex align-items-center justify-content-center bg-dark bg-opacity-50 rounded">
+                                                    <span class="small text-muted">+{{ model.training_images|slice:"4:"|length }} more</span>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    
+                                    <form action="{% url 'image_generation:generate_with_lora' %}" method="post" class="generate-form">
+                                        <input type="hidden" name="model_id" value="{{ model.id }}">
+                                        
+                                        <div class="mb-3">
+                                            <label for="prompt-{{ model.id }}" class="form-label">Prompt</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text">{{ model.trigger_word }},</span>
+                                                <input type="text" class="form-control" id="prompt-{{ model.id }}" name="prompt" 
+                                                    placeholder="wearing a red dress" required>
+                                            </div>
+                                            <small class="form-text text-muted">
+                                                The trigger word "{{ model.trigger_word }}" will be automatically included
+                                            </small>
+                                        </div>
+                                        
+                                        <div class="mb-3">
+                                            <label for="negative_prompt-{{ model.id }}" class="form-label">Negative Prompt</label>
+                                            <input type="text" class="form-control" id="negative_prompt-{{ model.id }}" 
+                                                name="negative_prompt" placeholder="deformed, ugly, bad anatomy">
+                                        </div>
+                                        
+                                        <div class="d-grid">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-magic me-2"></i>Generate with Model
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+                
+                <!-- Generated Images Section -->
+                {% if session.model_generations %}
+                    <div class="row mt-5">
+                        <div class="col-12">
+                            <h2 class="h4 mb-4">Generated Images</h2>
+                            
+                            <div class="row g-4">
+                                {% for generation in session.model_generations %}
+                                    <div class="col-sm-6 col-md-4">
+                                        <div class="card h-100 border-0 shadow-sm">
+                                            <img src="{{ generation.image_url }}" class="card-img-top" alt="Generated image">
+                                            <div class="card-body">
+                                                <h3 class="h6">{{ generation.model_name }}</h3>
+                                                <p class="small text-muted mb-0">{{ generation.prompt }}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                
+            {% else %}
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-robot fa-4x mb-3 text-muted"></i>
+                        <h2 class="h4 mb-3">No Trained Models Yet</h2>
+                        <p class="mb-4">You haven't trained any models yet. Start by generating characters and training a model.</p>
+                        <div class="d-flex justify-content-center gap-3">
+                            <a href="{% url 'image_generation:generate_character' %}" class="btn btn-outline-primary">
+                                <i class="fas fa-user-astronaut me-2"></i>Generate Characters
+                            </a>
+                            <a href="{% url 'model_training:finetune_lora' %}" class="btn btn-primary">
+                                <i class="fas fa-brain me-2"></i>Train a Model
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Show loading indicators when generate forms are submitted
+        const generateForms = document.querySelectorAll('.generate-form');
+        
+        generateForms.forEach(form => {
+            form.addEventListener('submit', function() {
+                const submitButton = this.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Generating...';
+            });
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section class="hero">
+    <div class="row align-items-center g-5">
+        <div class="col-lg-7">
+            <p class="eyebrow">AI media generation platform</p>
+            <h1 class="hero-title">From a prompt to a finished podcast.</h1>
+            <p class="hero-lead">
+                Script generation, voice synthesis, character-consistent images, and
+                lipsynced video — orchestrated through Replicate models and run as
+                background jobs, end to end.
+            </p>
+            <div class="d-flex flex-wrap gap-3 mt-4">
+                <a href="{% url 'image_generation:model_gallery' %}" class="btn btn-accent">Browse Model Gallery</a>
+                <a href="{% url 'schema-swagger-ui' %}" class="btn btn-outline-light">Explore the API</a>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="pipeline-panel">
+                <div class="pipeline-panel-label">PIPELINE / PODCAST</div>
+                <ol class="pipeline-steps">
+                    <li><span class="step-index">01</span><span class="step-name">Script</span><span class="step-tag">OpenRouter</span></li>
+                    <li><span class="step-index">02</span><span class="step-name">Voices</span><span class="step-tag">Minimax</span></li>
+                    <li><span class="step-index">03</span><span class="step-name">Video</span><span class="step-tag">Kling / Veo 3</span></li>
+                    <li><span class="step-index">04</span><span class="step-name">Render</span><span class="step-tag">Job queue</span></li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="mt-5 pt-3">
+    <p class="eyebrow">Live in this UI</p>
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="panel-card h-100">
+                <i class="fas fa-images panel-icon"></i>
+                <h2 class="h4 mb-2">Model Gallery</h2>
+                <p class="text-muted mb-4">Browse your fine-tuned LoRA character models and generate new images with their trigger words.</p>
+                <a href="{% url 'image_generation:model_gallery' %}" class="link-arrow">Open gallery <i class="fas fa-arrow-right ms-1"></i></a>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="panel-card h-100">
+                <i class="fas fa-film panel-icon"></i>
+                <h2 class="h4 mb-2">Playground · Google Veo 3</h2>
+                <p class="text-muted mb-4">Try text/image-to-video generation directly against Google's Veo 3 model. Requires sign-in.</p>
+                <a href="{% url 'google_veo3_playground' %}" class="link-arrow">Open playground <i class="fas fa-arrow-right ms-1"></i></a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="mt-5 pt-3">
+    <p class="eyebrow">Available through the API</p>
+    <div class="row g-4">
+        <div class="col-md-3 col-sm-6">
+            <div class="panel-card panel-card-compact h-100">
+                <i class="fas fa-user-astronaut panel-icon-sm"></i>
+                <h3 class="h6 mb-1">Character generation</h3>
+                <p class="small text-muted mb-0">Flux-based character images from a text prompt.</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="panel-card panel-card-compact h-100">
+                <i class="fas fa-people-arrows panel-icon-sm"></i>
+                <h3 class="h6 mb-1">Pose variation</h3>
+                <p class="small text-muted mb-0">Consistent poses for an existing character.</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="panel-card panel-card-compact h-100">
+                <i class="fas fa-brain panel-icon-sm"></i>
+                <h3 class="h6 mb-1">LoRA fine-tuning</h3>
+                <p class="small text-muted mb-0">Train a model on your own character images.</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="panel-card panel-card-compact h-100">
+                <i class="fas fa-microphone panel-icon-sm"></i>
+                <h3 class="h6 mb-1">Voice &amp; audio</h3>
+                <p class="small text-muted mb-0">Text-to-speech and voice cloning.</p>
+            </div>
+        </div>
+    </div>
+    <p class="text-muted small mt-4 mb-0">
+        Full request/response reference: <a href="{% url 'schema-swagger-ui' %}">Swagger UI</a> ·
+        <a href="{% url 'schema-redoc' %}">ReDoc</a>
+    </p>
+</section>
+{% endblock %}
