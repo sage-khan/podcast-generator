@@ -1,0 +1,153 @@
+{# Reference template only — not currently wired to a URL route. The image_generation/model_training views it posts to now return JSON, not a rendered page, so this form-based flow needs an AJAX rewrite (see model_gallery.html or google_veo3_playground.html for the current pattern) before it can go live. #}
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <h1 class="mb-4"><i class="fas fa-user-astronaut me-2 text-info"></i>Character Generator</h1>
+            <p class="lead mb-4">Create unique characters using the Flux model</p>
+            
+            <div class="row">
+                <!-- Generation Form -->
+                <div class="col-md-5">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body p-4">
+                            <h2 class="h5 mb-4">Generate a Character</h2>
+                            
+                            <form id="characterForm" action="{% url 'image_generation:generate_character' %}" method="post">
+                                <div class="mb-3">
+                                    <label for="prompt" class="form-label">Prompt</label>
+                                    <textarea class="form-control" id="prompt" name="prompt" rows="3" placeholder="Describe your character here..." required></textarea>
+                                    <small class="form-text text-muted">
+                                        Example: "a female elf warrior with long silver hair, emerald eyes, wearing light armor"
+                                    </small>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="negative_prompt" class="form-label">Negative Prompt</label>
+                                    <textarea class="form-control" id="negative_prompt" name="negative_prompt" rows="2" placeholder="What you want to avoid..."></textarea>
+                                    <small class="form-text text-muted">
+                                        Example: "deformed, ugly, bad anatomy, blurry"
+                                    </small>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary" id="generateBtn">
+                                        <i class="fas fa-magic me-2"></i>Generate Character
+                                    </button>
+                                </div>
+                            </form>
+                            
+                            <div class="mt-4">
+                                <h3 class="h6 mb-3">Tips for better results:</h3>
+                                <ul class="small text-muted">
+                                    <li>Be specific about appearance details</li>
+                                    <li>Include character traits and style</li>
+                                    <li>Mention clothing, accessories, and background</li>
+                                    <li>Use negative prompts to avoid unwanted elements</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Generated Images Display -->
+                <div class="col-md-7">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <h2 class="h5 mb-4">Generated Characters</h2>
+                            
+                            <div id="loadingIndicator" class="text-center d-none">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Generating character... This may take a minute.</p>
+                            </div>
+                            
+                            <div id="generatedCharacters" class="row g-3">
+                                <!-- Characters will be displayed here -->
+                                {% if session.generated_images %}
+                                    {% for image in session.generated_images %}
+                                        <div class="col-sm-6 mb-4">
+                                            <div class="card h-100 border-0 shadow-sm">
+                                                <img src="{{ image.image_url }}" class="card-img-top" alt="Generated character">
+                                                <div class="card-body">
+                                                    <p class="card-text small text-muted">{{ image.prompt }}</p>
+                                                    <div class="d-flex justify-content-between mt-2">
+                                                        <button class="btn btn-sm btn-outline-primary use-for-poses-btn" 
+                                                                data-image-url="{{ image.image_url }}">
+                                                            Use for Poses
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-success use-for-training-btn"
+                                                                data-image-url="{{ image.image_url }}">
+                                                            Use for Training
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="col-12 text-center py-5">
+                                        <i class="fas fa-image fa-3x mb-3 text-muted"></i>
+                                        <p>No characters generated yet. Create your first character!</p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Show loading indicator when form is submitted
+        const characterForm = document.getElementById('characterForm');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const generatedCharacters = document.getElementById('generatedCharacters');
+        
+        if (characterForm) {
+            characterForm.addEventListener('submit', function() {
+                loadingIndicator.classList.remove('d-none');
+                generatedCharacters.classList.add('d-none');
+            });
+        }
+        
+        // Handle "Use for Poses" buttons
+        const poseButtons = document.querySelectorAll('.use-for-poses-btn');
+        poseButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const imageUrl = this.getAttribute('data-image-url');
+                // Store in session storage for use in the pose generator
+                sessionStorage.setItem('selectedImageUrl', imageUrl);
+                // Redirect to pose generator
+                window.location.href = "{% url 'image_generation:generate_poses' %}";
+            });
+        });
+        
+        // Handle "Use for Training" buttons
+        const trainingButtons = document.querySelectorAll('.use-for-training-btn');
+        trainingButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const imageUrl = this.getAttribute('data-image-url');
+                // Get existing training images or initialize empty array
+                let trainingImages = JSON.parse(sessionStorage.getItem('trainingImages') || '[]');
+                // Add this image if not already present
+                if (!trainingImages.includes(imageUrl)) {
+                    trainingImages.push(imageUrl);
+                    sessionStorage.setItem('trainingImages', JSON.stringify(trainingImages));
+                    alert('Image added to training collection!');
+                } else {
+                    alert('This image is already in your training collection.');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,26 @@
+# Update the storage size in 03-persistent-volumes.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-pvc
+  namespace: podcast-generator
+spec:
+  accessModes:
+    - ReadWriteOnce  # Digital Ocean block storage only supports ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi  #  20Gi
+  storageClassName: do-block-storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: static-pvc
+  namespace: podcast-generator
+spec:
+  accessModes:
+    - ReadWriteOnce  # Digital Ocean block storage only supports ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi  # 5Gi is usually sufficient for static files
+  storageClassName: do-block-storage

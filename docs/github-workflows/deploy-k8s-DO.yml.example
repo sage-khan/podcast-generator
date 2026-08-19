@@ -1,0 +1,332 @@
+name: Deploy to Digital Ocean Kubernetes
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run database migrations'
+        required: false
+        type: boolean
+        default: false
+      skip_build:
+        description: 'Skip Docker image build (use existing image)'
+        required: false
+        type: boolean
+        default: false
+      update_dns:
+        description: 'Update DNS record with LoadBalancer IP'
+        required: false
+        type: boolean
+        default: false
+      run_script:
+        description: 'Run deployment script for Kubernetes resources'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  K8S_REGISTRY: registry.digitalocean.com
+  K8S_REGISTRY_NAME: podcast-generator-registry
+  K8S_IMAGE_NAME: podcast-generator
+  K8S_NAMESPACE: podcast-generator
+  K8S_DEPLOYMENT_NAME: web
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_API_TOKEN }}
+          
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+      
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
+      
+      - name: Build and push Docker image
+        if: ${{ github.event.inputs.skip_build != 'true' }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ env.K8S_REGISTRY }}/${{ env.K8S_REGISTRY_NAME }}/${{ env.K8S_IMAGE_NAME }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+      
+      # This step is necessary to prevent cache from growing indefinitely
+      - name: Move cache
+        if: ${{ github.event.inputs.skip_build != 'true' }}
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+      
+      - name: Save kubeconfig
+        run: |
+          # List available clusters
+          echo "Available Kubernetes clusters:"
+          doctl kubernetes cluster list
+          
+          # Get the first cluster ID (or you can filter for a specific cluster name)
+          CLUSTER_ID=$(doctl kubernetes cluster list --format ID --no-header | head -n 1)
+          
+          if [ -z "$CLUSTER_ID" ]; then
+            echo "ERROR: No Kubernetes clusters found in Digital Ocean account"
+            exit 1
+          fi
+          
+          echo "Using Kubernetes cluster ID: $CLUSTER_ID"
+          doctl kubernetes cluster kubeconfig save $CLUSTER_ID
+      
+      - name: Create namespace if it doesn't exist
+        run: kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+      
+      # Load secrets and configs into env file for the deployment script
+      - name: Set up environment for deployment
+        run: |
+          echo "REPLICATE_API_TOKEN=${{ secrets.REPLICATE_API_TOKEN }}" >> .env
+          echo "REPLICATE_OWNER=${{ secrets.REPLICATE_OWNER }}" >> .env
+          echo "REPLICATE_LORA_TRAINER_MODEL=${{ secrets.REPLICATE_LORA_TRAINER_MODEL }}" >> .env
+          echo "DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}" >> .env
+          echo "DJANGO_SETTINGS_MODULE=config.settings" >> .env
+          echo "DJANGO_DEBUG=False" >> .env
+          echo "DOMAIN=${{ secrets.DOMAIN }}" >> .env
+          echo "K8S_DOMAIN=${{ secrets.K8S_DOMAIN }}" >> .env
+          echo "K8S_DOMAIN_IP=${{ secrets.K8S_DOMAIN_IP || 'auto' }}" >> .env
+          echo "WEBHOOK_BASE_URL=https://${{ secrets.DOMAIN }}" >> .env
+          echo "K8S_WEBHOOK_BASE_URL=https://${{ secrets.K8S_DOMAIN }}" >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}" >> .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "DO_API_TOKEN=${{ secrets.DO_API_TOKEN }}" >> .env
+          echo "DO_SPACES_BUCKET=${{ secrets.DO_SPACES_BUCKET }}" >> .env
+          echo "DO_SPACES_KEY=${{ secrets.DO_SPACES_KEY }}" >> .env
+          echo "DO_SPACES_SECRET=${{ secrets.DO_SPACES_SECRET }}" >> .env
+          echo "GH_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> .env
+          echo "K8S_REGISTRY=${{ env.K8S_REGISTRY }}" >> .env
+          echo "K8S_REGISTRY_NAME=${{ env.K8S_REGISTRY_NAME }}" >> .env
+          echo "K8S_IMAGE_NAME=${{ env.K8S_IMAGE_NAME }}" >> .env
+          echo "K8S_NAMESPACE=${{ env.K8S_NAMESPACE }}" >> .env
+          echo "K8S_DEPLOYMENT_NAME=${{ env.K8S_DEPLOYMENT_NAME }}" >> .env
+          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" >> .env
+          echo "DO_ALL_BUCKETS=${{ secrets.DO_ALL_BUCKETS }}" >> .env
+          echo "DO_ALL_BUCKETS_KEY=${{ secrets.DO_ALL_BUCKETS_KEY }}" >> .env
+          echo "DO_ALL_BUCKETS_SECRET=${{ secrets.DO_ALL_BUCKETS_SECRET }}" >> .env
+      - name: Create PostgreSQL CA Certificate Secret
+        run: |
+          # postgres-ca.crt is provided locally (gitignored) or written from a repo secret at deploy time
+          kubectl create secret generic postgres-ca -n ${{ env.K8S_NAMESPACE }} --from-file=ca.crt=k8s/postgres-ca.crt --dry-run=client -o yaml | kubectl apply -f -
+      # Deploy to Kubernetes using the script
+      - name: Run Kubernetes deployment script
+        if: ${{ github.event.inputs.run_script == 'true' }}
+        run: |
+          # Generate deployment script
+          cat > deploy.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Apply Kubernetes resources in order
+          echo "Deploying Kubernetes resources..."
+          
+          # Create namespace
+          echo "1. Creating namespace..."
+          kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Create ConfigMap and Secrets
+          echo "2. Creating ConfigMap and Secrets..."
+          kubectl apply -f k8s/01-secrets.yaml -f k8s/02-configmap.yaml
+          
+          # Create Persistent Volume Claims
+          echo "3. Creating Persistent Volume Claims..."
+          kubectl apply -f k8s/03-persistent-volumes.yaml -f k8s/05-redis-pvc.yaml
+          
+          # Wait for PVCs to be bound
+          echo "Waiting for PVCs to be bound..."
+          kubectl wait --for=condition=bound pvc/media-pvc -n ${{ env.K8S_NAMESPACE }} --timeout=60s || true
+          kubectl wait --for=condition=bound pvc/redis-pvc -n ${{ env.K8S_NAMESPACE }} --timeout=60s || true
+          echo "Note: PVCs may take time to bind fully. Continuing deployment..."
+          
+          # Deploy Redis
+          echo "4. Deploying Redis..."
+          kubectl apply -f k8s/05-redis-deployment.yaml
+          echo "Waiting for Redis to be ready..."
+          kubectl wait --for=condition=available deployment/redis -n ${{ env.K8S_NAMESPACE }} --timeout=120s || true
+          
+          # Deploy Web and Celery
+          echo "5. Deploying Web and Celery services..."
+          kubectl apply -f k8s/06-web-deployment.yaml -f k8s/07-celery-deployment.yaml -f k8s/08-celery-beat-deployment.yaml
+          
+          # Deploy Nginx and Services
+          echo "6. Deploying Nginx and Services..."
+          kubectl apply -f k8s/09-nginx-config.yaml -f k8s/10-nginx-deployment.yaml -f k8s/11-services.yaml
+          
+          # Configure Ingress and Cert Issuer
+          echo "7. Configuring Ingress and Certificate Issuer..."
+          kubectl apply -f k8s/12-ingress.yaml -f k8s/13-cert-issuer.yaml
+          
+          # Create Horizontal Pod Autoscalers if they exist
+          if [ -f "k8s/14-web-hpa.yaml" ] && [ -f "k8s/15-celery-hpa.yaml" ]; then
+              echo "8. Creating Horizontal Pod Autoscalers..."
+              kubectl apply -f k8s/14-web-hpa.yaml -f k8s/15-celery-hpa.yaml
+          fi
+          EOF
+          
+          # Make script executable
+          chmod +x deploy.sh
+          
+          # Run deployment script
+          ./deploy.sh
+      
+      # Apply database migrations if requested
+      - name: Run database migrations
+        if: ${{ github.event.inputs.run_migrations == 'true' }}
+        run: |
+          echo "Running comprehensive database migrations setup..."
+          
+          # Get a pod from the deployment
+          POD_NAME=$(kubectl get pod -n ${{ env.K8S_NAMESPACE }} -l app=web -o jsonpath="{.items[0].metadata.name}")
+          echo "Using pod: $POD_NAME"
+          
+          # Make migrations for all apps
+          echo "Creating migrations for all apps..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations
+              
+          # Special focus on the podcast_generator app (check if it exists first)
+          echo "Checking for podcast_generator app..."
+          if kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python -c "from django.conf import settings; print('podcast_generator' in settings.INSTALLED_APPS or any(app.endswith('.podcast_generator') for app in settings.INSTALLED_APPS))"; then
+            echo "Creating specific migrations for podcast_generator app..."
+            kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations podcast_generator || echo "Warning: podcast_generator makemigrations failed but continuing"
+          else
+            echo "podcast_generator app not found in INSTALLED_APPS, skipping specific migrations"
+          fi
+              
+          # Also ensure image_generation app has migrations (for the new fields we added)
+          echo "Creating specific migrations for image_generation app..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations image_generation || echo "Warning: image_generation makemigrations failed but continuing"
+              
+          # Apply all migrations
+          echo "Applying all migrations..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate
+              
+          # Specifically ensure podcast_generator migrations are applied if the app exists
+          echo "Checking for podcast_generator app before applying specific migrations..."
+          if kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python -c "from django.conf import settings; print('podcast_generator' in settings.INSTALLED_APPS or any(app.endswith('.podcast_generator') for app in settings.INSTALLED_APPS))"; then
+            echo "Ensuring podcast_generator migrations are applied..."
+            kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate podcast_generator || echo "Warning: podcast_generator migrate failed but continuing"
+          else
+            echo "podcast_generator app not found in INSTALLED_APPS, skipping specific migrate"
+          fi
+              
+          # Specifically ensure image_generation migrations are applied
+          echo "Ensuring image_generation migrations are applied..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate image_generation || echo "Warning: image_generation migrate failed but continuing"
+              
+          echo "Database migrations completed successfully."
+      
+      # Update DNS record with new LoadBalancer IP
+      - name: Update DNS Record (optional)
+        if: ${{ github.event.inputs.update_dns == 'true' }}
+        run: |
+          # Get the load balancer IP
+          LB_IP=$(kubectl get service nginx -n ${{ env.K8S_NAMESPACE }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          if [ -n "$LB_IP" ]; then
+            echo "LoadBalancer IP: $LB_IP"
+            echo "Updating DNS record for ${{ secrets.K8S_DOMAIN }}..."
+            
+            # Get the domain record ID
+            DOMAIN_ID=$(doctl compute domain records list ${{ secrets.DOMAIN }} --format ID,Type,Name,Data --no-header | grep "A" | grep "k8s" | awk '{print $1}')
+            
+            if [ -n "$DOMAIN_ID" ]; then
+              echo "Updating domain record $DOMAIN_ID to point to $LB_IP"
+              doctl compute domain records update ${{ secrets.DOMAIN }} --record-id $DOMAIN_ID --record-data $LB_IP
+              echo "DNS record updated successfully"
+            else
+              echo "Creating new A record for ${{ secrets.K8S_DOMAIN }}"
+              doctl compute domain records create ${{ secrets.DOMAIN }} --record-type A --record-name k8s --record-data $LB_IP
+              echo "DNS record created successfully"
+            fi
+
+            # Update .env file with the new IP
+            echo "K8S_DOMAIN_IP=$LB_IP" >> .env
+          else
+            echo "LoadBalancer IP not available yet"
+          fi
+      
+      # Check deployment status
+      - name: Check deployment status
+        run: |
+          echo "----- Pod Status -----"
+          kubectl get pods -n ${{ env.K8S_NAMESPACE }}
+          
+          echo "----- Service Status -----"
+          kubectl get svc -n ${{ env.K8S_NAMESPACE }}
+          
+          echo "----- PVC Status -----"
+          kubectl get pvc -n ${{ env.K8S_NAMESPACE }}
+          
+          echo "----- Recent Events -----"
+          kubectl get events -n ${{ env.K8S_NAMESPACE }} --sort-by='.lastTimestamp' | tail -n 20
+          
+          echo "----- Certificate Status -----"
+          kubectl get certificates,certificaterequests -n ${{ env.K8S_NAMESPACE }}
+          
+          echo "----- Ingress Status -----"
+          kubectl get ingress -n ${{ env.K8S_NAMESPACE }}
+      
+      # Run comprehensive migrations setup
+      - name: Run comprehensive database migrations
+        run: |
+          echo "Running comprehensive database migrations setup..."
+          
+          # Get a pod from the deployment
+          POD_NAME=$(kubectl get pod -n ${{ env.K8S_NAMESPACE }} -l app=${{ env.K8S_DEPLOYMENT_NAME }} -o jsonpath="{.items[0].metadata.name}")
+          echo "Using pod: $POD_NAME"
+          
+          # Make migrations for all apps
+          echo "Creating migrations for all apps..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations
+              
+          # Special focus on the podcast_generator app (address the "relation does not exist" issue)
+          echo "Creating specific migrations for podcast_generator app..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations podcast_generator
+              
+          # Also ensure image_generation app has migrations (for the new fields we added)
+          echo "Creating specific migrations for image_generation app..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py makemigrations image_generation
+              
+          # Apply all migrations
+          echo "Applying all migrations..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate
+              
+          # Specifically ensure podcast_generator migrations are applied
+          echo "Ensuring podcast_generator migrations are applied..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate podcast_generator
+              
+          # Specifically ensure image_generation migrations are applied
+          echo "Ensuring image_generation migrations are applied..."
+          kubectl exec -n ${{ env.K8S_NAMESPACE }} $POD_NAME -- python manage.py migrate image_generation
+              
+          echo "Database migrations completed successfully."
+          
+          # Send notification with deployment status
+      - name: Send notification
+        if: always()
+        run: |
+          echo "Deployment status: ${{ job.status }}"
+          # Add your notification logic here (Slack, email, etc.)

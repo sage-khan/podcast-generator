@@ -1,0 +1,107 @@
+#version: '3.8'
+
+services:
+  web:
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - ./media:/app/media
+      - ./static:/app/static
+    command: gunicorn --config /app/config/gunicorn.conf.py config.wsgi:application
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - PYTHONPATH=/app
+    working_dir: /app
+  
+  db:
+    image: postgres:13
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_DB=${POSTGRES_DB}
+    #ports:
+    #  - "5432:5432" # Maps container port 5432 to host port 5432
+    # ...
+  nginx:
+    image: nginx:1.21-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./static:/var/www/static
+      - ./media:/var/www/media
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/acme_challenge:/var/www/podcast-generator/certbot/www
+    depends_on:
+      - web
+    command: >
+      /bin/sh -c "
+        while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+        nginx -g 'daemon off;'
+      "
+  
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/podcast-generator/certbot/www
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    expose:
+      - "6379"
+
+  celery:
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - ./media:/app/media
+    working_dir: /app
+    command: celery -A config.celery worker --loglevel=info
+
+  celery-beat:
+    build: .
+    command: celery -A config.celery beat --loglevel=info
+    volumes:
+      - .:/app
+      - ./media:/app/media
+    depends_on:
+      - redis
+      - db
+    restart: always
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - DATABASE_URL=${DATABASE_URL}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_ENGINE=${DB_ENGINE}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+
+volumes:
+  postgres_data:

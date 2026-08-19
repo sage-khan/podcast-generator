@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: podcast-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21-alpine
+        ports:
+        - containerPort: 80
+        - containerPort: 443
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        - name: static-volume
+          mountPath: /var/www/static
+        - name: media-volume
+          mountPath: /var/www/media
+        - name: ssl
+          mountPath: /etc/nginx/ssl
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: static-volume
+        persistentVolumeClaim:
+          claimName: static-pvc
+      - name: media-volume
+        persistentVolumeClaim:
+          claimName: media-pvc
+      - name: ssl
+        secret:
+          secretName: app-tls
