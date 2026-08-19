@@ -1,21 +1,29 @@
 [project]
-name = "repl-nix-workspace"
+name = "podcast-generator"
 version = "0.1.0"
-description = "Add your description here"
+description = "Django-based AI media generation platform: character/voice/video generation and podcast script-to-video pipelines on the Replicate API."
 requires-python = ">=3.11"
 dependencies = [
-    "email-validator>=2.2.0",
-    "flask-restful>=0.3.10",
-    "flask>=3.1.0",
-    "flask-sqlalchemy>=3.1.1",
-    "gunicorn>=23.0.0",
-    "psycopg2-binary>=2.9.10",
-    "python-dotenv>=1.1.0",
-    "replicate>=1.0.4",
-    "requests>=2.32.3",
-    "flask-migrate>=4.1.0",
-    "django-cors-headers>=4.7.0",
-    "django>=5.2",
-    "djangorestframework>=3.16.0",
-    "boto3>=1.37.31",
+    "django>=5.0,<6.0",
+    "djangorestframework>=3.14.0,<4.0",
+    "django-cors-headers>=4.0.0,<5.0",
+    "drf-yasg>=1.21.0,<2.0",
+    "psycopg2-binary>=2.9.0,<3.0",
+    "dj-database-url>=2.3.0,<3.0",
+    "python-dotenv>=1.0.0",
+    "replicate>=1.0.7",
+    "requests>=2.31.0",
+    "gunicorn>=21.0.0,<22.0",
+    "whitenoise>=6.0.0,<7.0",
+    "boto3>=1.37.0,<2.0",
+    "Pillow>=10.0.0,<11.0",
+    "PyPDF2>=3.0.1,<4.0",
+    "pyyaml>=6.0.2,<7.0",
+    "pdfplumber>=0.10.3,<1.0",
+    "google-generativeai>=0.3.2,<1.0",
 ]
+
+# This is a Django *project* (its own manage.py/settings.py/urls.py), not a
+# reusable library, so it isn't published to PyPI as-is. See
+# shared/providers/ for the framework-agnostic piece (LLM + storage provider
+# adapters) that is designed to be extractable into its own package later.
