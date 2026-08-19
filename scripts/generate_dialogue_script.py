@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import argparse
 import requests
@@ -6,12 +7,16 @@ import PyPDF2
 from dotenv import load_dotenv
 import logging
 
+# Allow `from shared.providers.llm import get_llm_provider` without Django,
+# matching the sys.path convention used by the other standalone scripts here.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.providers.llm import get_llm_provider
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load environment variables
 load_dotenv()
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 def extract_text_from_pdf(pdf_path):
     """Extracts text from a PDF file."""
@@ -25,36 +30,19 @@ def extract_text_from_pdf(pdf_path):
         return None
 
 def generate_script(prompt, speaker_names, context=None):
-    """Generates a dialogue script using OpenRouter API."""
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY not found in environment variables.")
-
+    """Generates a dialogue script using the configured LLM provider (LLM_PROVIDER env var; defaults to OpenRouter)."""
     full_prompt = f"{prompt}\n\nSpeakers: {', '.join(speaker_names)}\n\nHere is some additional context:\n\n{context}"
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://example.com",
-        "X-Title": "Podcast Generator Script Generator",
-    }
-
-    data = {
-        "model": "openai/gpt-4o",
-        "messages": [
-            {"role": "system", "content": "You are a scriptwriter. Create a compelling dialogue for a podcast with the specified speakers. The output should be just the script content, in the format 'Speaker Name: Dialogue line'. Each line of dialogue should be on a new line."},
-            {"role": "user", "content": full_prompt}
-        ],
-        "temperature": 0.8,
-        "max_tokens": 3000,
-    }
+    messages = [
+        {"role": "system", "content": "You are a scriptwriter. Create a compelling dialogue for a podcast with the specified speakers. The output should be just the script content, in the format 'Speaker Name: Dialogue line'. Each line of dialogue should be on a new line."},
+        {"role": "user", "content": full_prompt},
+    ]
 
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=120)
-        response.raise_for_status()
-        script_text = response.json()['choices'][0]['message']['content']
-        return script_text
-    except requests.exceptions.RequestException as e:
-        logging.error(f"API request failed: {e}")
+        provider = get_llm_provider()
+        return provider.chat(messages, temperature=0.8, max_tokens=3000)
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logging.error(f"LLM provider request failed: {e}")
         return None
 
 def analyze_sentiment(sentence):

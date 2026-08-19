@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Generates a podcast monologue script using OpenRouter API.
+Generates a podcast monologue script using the configured LLM provider
+(LLM_PROVIDER env var — see shared/providers/llm/factory.py; defaults to
+OpenRouter for backward compatibility).
 
 This script takes a prompt, speaker name, and an optional PDF file to generate a
 monologue. The output is saved as a text file and a JSON file.
@@ -14,10 +16,18 @@ Example:
 """
 
 import os
+import sys
 import argparse
 import json
 import requests
 from dotenv import load_dotenv
+
+# Allow `from shared.providers.llm import get_llm_provider` without Django,
+# matching the sys.path convention used by the other standalone scripts here.
+# This copy lives one directory deeper (scripts/podcast_generation/) than
+# scripts/generate_monologue_script.py, hence the extra dirname().
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from shared.providers.llm import get_llm_provider
 
 # Attempt to import PyPDF2, provide instructions if not found
 try:
@@ -26,16 +36,11 @@ except ImportError:
     PyPDF2 = None
 
 # Load environment variables
-load_dotenv() 
+load_dotenv()
 load_dotenv('.env-do')
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-
 def generate_script(prompt, speaker_name, pdf_content=None):
-    """Generates a script using OpenRouter AI."""
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY environment variable not set.")
-
+    """Generates a script using the configured LLM provider (LLM_PROVIDER env var; defaults to OpenRouter)."""
     full_prompt = f"Create a podcast monologue script for a speaker named {speaker_name}.\n"
     full_prompt += f"The topic is: {prompt}\n"
 
@@ -47,22 +52,9 @@ def generate_script(prompt, speaker_name, pdf_content=None):
     full_prompt += "2. A 'json_script' field which is an array of objects, where each object has 'speaker', 'sentence', and 'expression' keys. the values of 'expression' has to be either 'auto', 'neutral', 'happy', 'sad','angry','fearful','disgusted' or 'surprised'\n"
 
     try:
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            },
-            json={
-                "model": "openai/gpt-4o",
-                "messages": [
-                    {"role": "user", "content": full_prompt}
-                ]
-            }
-        )
-        response.raise_for_status()
-        
-        completion = response.json()['choices'][0]['message']['content']
-        
+        provider = get_llm_provider()
+        completion = provider.chat([{"role": "user", "content": full_prompt}])
+
         # Clean the completion string: remove markdown fences and trim whitespace
         if completion.strip().startswith("```json"):
             completion = completion.strip()[7:-3].strip()
@@ -73,15 +65,15 @@ def generate_script(prompt, speaker_name, pdf_content=None):
         script_data = json.loads(completion)
         return script_data
 
-    except requests.exceptions.RequestException as e:
-        print(f"Error calling OpenRouter API: {e}")
-        return None
-    except (KeyError, IndexError) as e:
-        print(f"Error parsing OpenRouter response: {e}")
-        return None
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON from LLM response: {e}")
         print(f"Raw completion: {completion}")
+        return None
+    except (requests.exceptions.RequestException, ValueError) as e:
+        print(f"Error calling LLM provider: {e}")
+        return None
+    except (KeyError, IndexError) as e:
+        print(f"Error parsing LLM response: {e}")
         return None
 
 def extract_text_from_pdf(pdf_path):
