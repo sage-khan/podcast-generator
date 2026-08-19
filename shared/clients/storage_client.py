@@ -12,17 +12,80 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Backends that speak the S3 API and therefore share one boto3-backed code
+# path: DigitalOcean Spaces, AWS S3, Google Cloud Storage (via its S3
+# interoperability endpoint), and Cloudflare R2. Azure Blob Storage uses a
+# different API/auth model and is handled by a separate branch below.
+S3_LIKE_BACKENDS = {'do_spaces', 's3', 'gcs', 'r2'}
+
+# Per-backend defaults: (bucket env, endpoint env, key env, secret env,
+# base-url env, region env, default endpoint template, default region).
+# All of these fall back to generic AWS_*-style env vars where a
+# provider-specific one isn't set, so e.g. an existing AWS_ACCESS_KEY_ID
+# picked up by other tooling also works here without duplication.
+_S3_LIKE_ENV_DEFAULTS = {
+    'do_spaces': {
+        'bucket_env': 'DO_SPACES_BUCKET',
+        'endpoint_env': 'DO_SPACES_ENDPOINT',
+        'key_env': 'DO_SPACES_KEY',
+        'secret_env': 'DO_SPACES_SECRET',
+        'base_url_env': 'DO_SPACES_BASE_URL',
+        'region_env': 'DO_SPACES_REGION',
+        'default_bucket': 'ai-image-gen',
+        'endpoint_template': 'https://{region}.digitaloceanspaces.com',
+        'default_region': 'nyc3',
+    },
+    's3': {
+        'bucket_env': 'AWS_S3_BUCKET',
+        'endpoint_env': 'AWS_S3_ENDPOINT',
+        'key_env': 'AWS_ACCESS_KEY_ID',
+        'secret_env': 'AWS_SECRET_ACCESS_KEY',
+        'base_url_env': 'AWS_S3_BASE_URL',
+        'region_env': 'AWS_REGION',
+        'default_bucket': None,
+        # None endpoint_url tells boto3 to use AWS's real (non-custom) endpoint.
+        'endpoint_template': None,
+        'default_region': 'us-east-1',
+    },
+    'gcs': {
+        'bucket_env': 'GCS_BUCKET',
+        'endpoint_env': 'GCS_ENDPOINT',
+        'key_env': 'GCS_HMAC_ACCESS_KEY',
+        'secret_env': 'GCS_HMAC_SECRET',
+        'base_url_env': 'GCS_BASE_URL',
+        'region_env': 'GCS_REGION',
+        'default_bucket': None,
+        'endpoint_template': 'https://storage.googleapis.com',
+        'default_region': 'auto',
+    },
+    'r2': {
+        'bucket_env': 'R2_BUCKET',
+        'endpoint_env': 'R2_ENDPOINT',
+        'key_env': 'R2_ACCESS_KEY_ID',
+        'secret_env': 'R2_SECRET_ACCESS_KEY',
+        'base_url_env': 'R2_BASE_URL',
+        'region_env': 'R2_REGION',
+        'default_bucket': None,
+        # R2 endpoints are per-account: https://<account_id>.r2.cloudflarestorage.com
+        'endpoint_template': None,
+        'default_region': 'auto',
+    },
+}
+
+
 class StorageClient:
     """
-    Storage client to handle file storage in local filesystem or Digital Ocean Spaces.
-    Uses environment variables for configuration.
+    Storage client to handle file storage across local disk and any
+    S3-compatible object store (DigitalOcean Spaces, AWS S3, Google Cloud
+    Storage, Cloudflare R2) or Azure Blob Storage, selected via
+    STORAGE_BACKEND. Uses environment variables for configuration.
     """
-    
+
     def __init__(self):
         """Initialize storage client with configuration from environment"""
         # Get storage backend from environment
         self.storage_backend = os.getenv('STORAGE_BACKEND', 'local')
-        
+
         # Base paths for different types of storage
         self.base_paths = {
             'character_generation': os.getenv('CHARACTER_GENERATION_PATH', 'character_generation/output'),
@@ -30,67 +93,119 @@ class StorageClient:
             'model_training': os.getenv('MODEL_TRAINING_PATH', 'model_training/output'),
             'model_generation': os.getenv('MODEL_GENERATION_PATH', 'model_generation/output'),
         }
-        
+
         # Local storage config
         self.local_base_path = os.getenv('LOCAL_STORAGE_BASE_PATH', './media')
-        
-        # DO Spaces config
-        if self.storage_backend == 'do_spaces':
-            logger.info("Initializing Digital Ocean Spaces storage backend")
-            self.do_spaces_bucket = os.getenv('DO_SPACES_BUCKET', 'ai-image-gen')
-            self.do_spaces_endpoint = os.getenv('DO_SPACES_ENDPOINT', 'https://aicc.nyc3.digitaloceanspaces.com')
-            self.do_spaces_key = os.getenv('DO_SPACES_KEY')
-            self.do_spaces_secret = os.getenv('DO_SPACES_SECRET')
-            self.do_spaces_base_url = os.getenv('DO_SPACES_BASE_URL', 'https://ai-image-gen.nyc3.digitaloceanspaces.com')
-            self.do_spaces_region = os.getenv('DO_SPACES_REGION')
-            self.do_spaces_bucket = os.getenv('DO_SPACES_BUCKET', 'ai-image-gen')
-            self.do_spaces_endpoint = os.getenv('DO_SPACES_ENDPOINT', f"https://{self.do_spaces_bucket}.nyc3.digitaloceanspaces.com")
-            self.do_spaces_key = os.getenv('DO_SPACES_KEY')
-            self.do_spaces_secret = os.getenv('DO_SPACES_SECRET')
-            # Handle multiple possible env vars to decide which public base URL to use.
-            # Priority: explicitly supplied CDN endpoint -> origin endpoint -> generic base URL / fallback
-            cdn_endpoint = os.getenv('DO_SPACES_CDN_ENDPOINT')
-            origin_endpoint = os.getenv('DO_SPACES_ORIGIN_ENDPOINT')
-            base_url_env = os.getenv('DO_SPACES_BASE_URL')
 
-            if cdn_endpoint:
-                self.do_spaces_base_url = cdn_endpoint.rstrip('/')
-            elif origin_endpoint:
-                self.do_spaces_base_url = origin_endpoint.rstrip('/')
-            elif base_url_env:
-                # If user mistakenly puts generic endpoint (nyc3.digitaloceanspaces.com),
-                # auto-prepend bucket name so links are valid.
-                if base_url_env.rstrip('/') == 'https://nyc3.digitaloceanspaces.com':
-                    self.do_spaces_base_url = f"https://{self.do_spaces_bucket}.nyc3.digitaloceanspaces.com"
-                else:
-                    self.do_spaces_base_url = base_url_env.rstrip('/')
-            else:
-                # Safe default to bucket-specific origin domain
-                self.do_spaces_base_url = f"https://{self.do_spaces_bucket}.nyc3.digitaloceanspaces.com"
-            self.do_spaces_region = os.getenv('DO_SPACES_REGION')
-            
-            # Log configuration for debugging
-            logger.debug(f"DO Spaces bucket: {self.do_spaces_bucket}")
-            logger.debug(f"DO Spaces endpoint: {self.do_spaces_endpoint}")
-            logger.debug(f"DO Spaces base URL: {self.do_spaces_base_url}")
-            
-            # Initialize the S3 client
-            try:
-                # Use s3v4 signature and the custom endpoint
-                self.s3_client = boto3.client(
-                    's3',
-                    endpoint_url=self.do_spaces_endpoint,
-                    aws_access_key_id=self.do_spaces_key,
-                    aws_secret_access_key=self.do_spaces_secret,
-                    config=Config(signature_version='s3v4')  # Try s3v4 signature
-                )
-                logger.info("DO Spaces client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize DO Spaces client: {str(e)}")
-                logger.error("Falling back to local storage...")
-                self.storage_backend = 'local'
+        if self.storage_backend in S3_LIKE_BACKENDS:
+            self._init_s3_like_backend()
+        elif self.storage_backend == 'azure_blob':
+            self._init_azure_backend()
         else:
-            logger.info(f"Using local storage backend")
+            logger.info("Using local storage backend")
+            self.storage_backend = 'local'
+
+    def _init_s3_like_backend(self):
+        """Configure the boto3 S3 client shared by every S3-compatible backend."""
+        cfg = _S3_LIKE_ENV_DEFAULTS[self.storage_backend]
+        logger.info(f"Initializing {self.storage_backend} storage backend")
+
+        region = os.getenv(cfg['region_env'], cfg['default_region'])
+        self.do_spaces_bucket = os.getenv(cfg['bucket_env'], cfg['default_bucket'])
+        default_endpoint = (
+            cfg['endpoint_template'].format(region=region) if cfg['endpoint_template'] else None
+        )
+        self.do_spaces_endpoint = os.getenv(cfg['endpoint_env'], default_endpoint)
+        self.do_spaces_key = os.getenv(cfg['key_env'])
+        self.do_spaces_secret = os.getenv(cfg['secret_env'])
+        self.do_spaces_region = region
+
+        if not self.do_spaces_bucket:
+            logger.error(f"{cfg['bucket_env']} not set; falling back to local storage")
+            self.storage_backend = 'local'
+            return
+
+        # Handle multiple possible env vars to decide which public base URL to use.
+        # Priority: explicitly supplied CDN endpoint -> origin endpoint -> generic base URL / fallback
+        cdn_endpoint = os.getenv('DO_SPACES_CDN_ENDPOINT') if self.storage_backend == 'do_spaces' else None
+        origin_endpoint = os.getenv('DO_SPACES_ORIGIN_ENDPOINT') if self.storage_backend == 'do_spaces' else None
+        base_url_env = os.getenv(cfg['base_url_env'])
+
+        if cdn_endpoint:
+            self.do_spaces_base_url = cdn_endpoint.rstrip('/')
+        elif origin_endpoint:
+            self.do_spaces_base_url = origin_endpoint.rstrip('/')
+        elif base_url_env:
+            self.do_spaces_base_url = base_url_env.rstrip('/')
+        elif self.storage_backend == 'do_spaces':
+            self.do_spaces_base_url = f"https://{self.do_spaces_bucket}.{region}.digitaloceanspaces.com"
+        elif self.storage_backend == 's3':
+            self.do_spaces_base_url = f"https://{self.do_spaces_bucket}.s3.{region}.amazonaws.com"
+        elif self.storage_backend == 'gcs':
+            self.do_spaces_base_url = f"https://storage.googleapis.com/{self.do_spaces_bucket}"
+        else:  # r2 has no public URL without a configured custom domain/base URL
+            self.do_spaces_base_url = self.do_spaces_endpoint
+
+        # Log configuration for debugging
+        logger.debug(f"{self.storage_backend} bucket: {self.do_spaces_bucket}")
+        logger.debug(f"{self.storage_backend} endpoint: {self.do_spaces_endpoint}")
+        logger.debug(f"{self.storage_backend} base URL: {self.do_spaces_base_url}")
+
+        try:
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=self.do_spaces_endpoint,
+                aws_access_key_id=self.do_spaces_key,
+                aws_secret_access_key=self.do_spaces_secret,
+                region_name=None if self.storage_backend in ('gcs', 'r2') else region,
+                config=Config(signature_version='s3v4'),
+            )
+            logger.info(f"{self.storage_backend} client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize {self.storage_backend} client: {str(e)}")
+            logger.error("Falling back to local storage...")
+            self.storage_backend = 'local'
+
+    def _init_azure_backend(self):
+        """Configure the Azure Blob Storage client (separate SDK/API from S3)."""
+        try:
+            from azure.storage.blob import BlobServiceClient
+        except ImportError:
+            logger.error(
+                "STORAGE_BACKEND=azure_blob requires the 'azure-storage-blob' package "
+                "(pip install azure-storage-blob). Falling back to local storage."
+            )
+            self.storage_backend = 'local'
+            return
+
+        connection_string = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        account_url = os.getenv('AZURE_STORAGE_ACCOUNT_URL')
+        account_key = os.getenv('AZURE_STORAGE_ACCOUNT_KEY')
+        self.azure_container = os.getenv('AZURE_STORAGE_CONTAINER')
+
+        if not self.azure_container or not (connection_string or (account_url and account_key)):
+            logger.error(
+                "Azure Blob Storage requires AZURE_STORAGE_CONTAINER plus either "
+                "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_ACCOUNT_URL + "
+                "AZURE_STORAGE_ACCOUNT_KEY. Falling back to local storage."
+            )
+            self.storage_backend = 'local'
+            return
+
+        try:
+            if connection_string:
+                service_client = BlobServiceClient.from_connection_string(connection_string)
+            else:
+                service_client = BlobServiceClient(account_url=account_url, credential=account_key)
+            self.azure_container_client = service_client.get_container_client(self.azure_container)
+            self.do_spaces_base_url = os.getenv(
+                'AZURE_STORAGE_BASE_URL',
+                f"{service_client.url.rstrip('/')}/{self.azure_container}",
+            )
+            logger.info("Azure Blob Storage client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure Blob Storage client: {str(e)}")
+            logger.error("Falling back to local storage...")
             self.storage_backend = 'local'
 
     # ------------------------------------------------------------------
@@ -137,11 +252,19 @@ class StorageClient:
         presigned URL.  This avoids the situation where a HEAD request from our
         backend returns 200 (because we have credentials) but external services
         like Replicate later receive a 403.
-        
+
         For any other URL that doesn't belong to our bucket we do a quick HEAD
         request – if that succeeds we assume the URL is already public and just
         return it.  Otherwise we simply return the original URL (caller may
         decide to upload it elsewhere).
+
+        Note: the presign shortcut above only recognizes DO Spaces URL shapes
+        (see _extract_bucket_and_key). Objects uploaded to the other
+        S3_LIKE_BACKENDS or Azure fall through to the generic HEAD-request
+        check below, which is sufficient as long as they're uploaded with
+        the public-read ACL that upload_file()/save_url_to_storage() already
+        set — presigning for private buckets on those backends isn't
+        implemented since nothing in this codebase uses private buckets yet.
         """
         # If this is a DO Spaces object that we control, generate a presigned URL
         bucket, key = self._extract_bucket_and_key(url)
@@ -238,8 +361,8 @@ class StorageClient:
             with open(local_file_path, 'wb') as f:
                 f.write(response.content)
             
-            # Try to upload to DO Spaces if enabled
-            if self.storage_backend == 'do_spaces':
+            # Try to upload to the configured remote object store, if any
+            if self.storage_backend in S3_LIKE_BACKENDS:
                 try:
                     # Create object key
                     object_key = f"{base_path}/{filename}"
@@ -262,12 +385,28 @@ class StorageClient:
                     return do_url
                     
                 except Exception as e:
-                    logger.error(f"DO Spaces upload failed: {str(e)}")
+                    logger.error(f"{self.storage_backend} upload failed: {str(e)}")
                     logger.info("Falling back to local storage")
-            
-            # Return local path if DO upload failed or not enabled
+            elif self.storage_backend == 'azure_blob':
+                try:
+                    object_key = f"{base_path}/{filename}"
+                    with open(local_file_path, 'rb') as data:
+                        self.azure_container_client.upload_blob(
+                            name=object_key,
+                            data=data,
+                            overwrite=True,
+                            content_type=response.headers.get('Content-Type', 'image/jpeg'),
+                        )
+                    azure_url = f"{self.do_spaces_base_url}/{object_key}"
+                    logger.info(f"File uploaded to Azure Blob Storage: {azure_url}")
+                    return azure_url
+                except Exception as e:
+                    logger.error(f"Azure Blob Storage upload failed: {str(e)}")
+                    logger.info("Falling back to local storage")
+
+            # Return local path if the remote upload failed or no remote backend is enabled
             return f"/media/{base_path}/{filename}"
-            
+
         except Exception as e:
             logger.error(f"Error in save_url_to_storage: {str(e)}")
             # Return original URL as fallback
@@ -294,7 +433,7 @@ class StorageClient:
             
             # Check if URL belongs to any DO Spaces bucket (not just base_url)
             bucket, key = self._extract_bucket_and_key(url)
-            if self.storage_backend == 'do_spaces' and bucket and key:
+            if self.storage_backend in S3_LIKE_BACKENDS and bucket and key:
                 try:
                     self.s3_client.download_file(bucket, key, local_path)
                     logger.info(f"File downloaded from DO Spaces: {local_path}")
@@ -309,7 +448,7 @@ class StorageClient:
                 response.raise_for_status()
             except requests.exceptions.HTTPError as http_err:
                 # If we got a 403 from the CDN, try generating a presigned URL (object may be private)
-                if response is not None and response.status_code == 403 and self.storage_backend == 'do_spaces' and bucket and key:
+                if response is not None and response.status_code == 403 and self.storage_backend in S3_LIKE_BACKENDS and bucket and key:
                     logger.warning("403 Forbidden on direct GET – generating presigned URL and retrying")
                     try:
                         presigned_url = self.s3_client.generate_presigned_url(
@@ -406,8 +545,8 @@ class StorageClient:
             with open(file_path, 'rb') as src, open(local_dest, 'wb') as dest:
                 dest.write(src.read())
             
-            # Try to upload to DO Spaces if enabled
-            if self.storage_backend == 'do_spaces':
+            # Try to upload to the configured remote object store, if any
+            if self.storage_backend in S3_LIKE_BACKENDS:
                 try:
                     # Determine content type
                     content_type = None
@@ -459,13 +598,43 @@ class StorageClient:
                     return do_url
                     
                 except Exception as e:
-                    logger.error(f"DO Spaces upload failed: {str(e)}")
+                    logger.error(f"{self.storage_backend} upload failed: {str(e)}")
                     logger.info("Falling back to local storage")
-            
+            elif self.storage_backend == 'azure_blob':
+                try:
+                    content_type = None
+                    if filename.lower().endswith(('.jpg', '.jpeg')):
+                        content_type = 'image/jpeg'
+                    elif filename.lower().endswith('.png'):
+                        content_type = 'image/png'
+
+                    object_key = f"{base_path}/{filename}"
+                    with open(file_path, 'rb') as data:
+                        self.azure_container_client.upload_blob(
+                            name=object_key,
+                            data=data,
+                            overwrite=True,
+                            content_type=content_type or 'application/octet-stream',
+                        )
+                    azure_url = f"{self.do_spaces_base_url}/{object_key}"
+                    logger.info(f"File uploaded to Azure Blob Storage: {azure_url}")
+
+                    if is_file_object and os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+
+                    if include_presigned:
+                        # Azure Blob Storage SAS-token presigning isn't implemented;
+                        # both fields point at the same public blob URL.
+                        return {"public_url": azure_url, "presigned_url": azure_url}
+                    return azure_url
+                except Exception as e:
+                    logger.error(f"Azure Blob Storage upload failed: {str(e)}")
+                    logger.info("Falling back to local storage")
+
             # Clean up temp file if we created one
             if is_file_object and os.path.exists(temp_file_path):
                 os.unlink(temp_file_path)
-                
+
             local_url = f"/media/{base_path}/{filename}"
             if include_presigned:
                 # For local backend we simply duplicate the URL fields
@@ -488,12 +657,12 @@ class StorageClient:
             URL to the object
         """
         try:
-            # For DO Spaces, construct the URL with base URL
-            if self.storage_backend == 'do_spaces':
+            # For any S3-compatible or Azure backend, construct the URL from base_url
+            if self.storage_backend in S3_LIKE_BACKENDS or self.storage_backend == 'azure_blob':
                 # Ensure no leading slash to avoid double slashes in the URL
                 if object_key.startswith('/'):
                     object_key = object_key[1:]
-                
+
                 return f"{self.do_spaces_base_url}/{object_key}"
             else:
                 # For local storage, just return a media URL
